@@ -20,6 +20,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 5,
   charset: "utf8mb4",
+  ssl: { rejectUnauthorized: false },
 });
 
 const JWT_SECRET = process.env.JWT_SECRET;
