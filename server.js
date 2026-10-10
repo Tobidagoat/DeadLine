@@ -1,0 +1,385 @@
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const mysql = require("mysql2/promise");
+const crypto = require("crypto");
+const path = require("path");
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "5mb" }));
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 5,
+  charset: "utf8mb4",
+});
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 20) {
+  console.error("JWT_SECRET missing or too short in .env");
+  process.exit(1);
+}
+
+function hashChapter(name, cards) {
+  const kanjiList = cards.map(c => (c.k || c.kanji || "").trim()).filter(Boolean).sort();
+  const h = crypto.createHash("sha256");
+  h.update(kanjiList.join("\n"));
+  return h.digest("hex");
+}
+
+function sign(user) {
+  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
+}
+
+async function auth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "no token" });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const [rows] = await pool.query(
+      "SELECT id, username, is_admin FROM users WHERE id = ?",
+      [payload.id]
+    );
+    if (rows.length === 0) return res.status(401).json({ error: "user not found" });
+    req.user = rows[0];
+    next();
+  } catch (e) {
+    res.status(401).json({ error: "invalid token" });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ error: "admin only" });
+  next();
+}
+
+function publicUser(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    display_name: row.display_name || null,
+    avatar_emoji: row.avatar_emoji || null,
+    is_admin: !!row.is_admin,
+  };
+}
+
+async function seedUsers() {
+  const users = [
+    { name: process.env.SEED_USER_1, pass: process.env.SEED_PASSWORD },
+    { name: process.env.SEED_USER_2, pass: process.env.SEED_PASSWORD },
+  ].filter(u => u.name && u.pass);
+  for (const u of users) {
+    const [rows] = await pool.query("SELECT id FROM users WHERE username = ?", [u.name]);
+    if (rows.length === 0) {
+      const hash = await bcrypt.hash(u.pass, 10);
+      await pool.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [u.name, hash]);
+      console.log(`created user: ${u.name}`);
+    } else {
+      console.log(`user exists: ${u.name}`);
+    }
+  }
+}
+
+/* ---------- health ---------- */
+app.get("/api/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+/* ---------- auth ---------- */
+app.post("/api/auth/register", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
+  if (username.length > 50) return res.status(400).json({ error: "username too long" });
+  if (password.length < 6) return res.status(400).json({ error: "password must be at least 6 characters" });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const [r] = await pool.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [username, hash]);
+    const user = { id: r.insertId, username };
+    res.json({ token: sign(user), user: { id: user.id, username: user.username, display_name: null, avatar_emoji: null, is_admin: false } });
+  } catch (e) {
+    if (e.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "username taken" });
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
+  const [rows] = await pool.query(
+    "SELECT id, username, password_hash, display_name, avatar_emoji, is_admin FROM users WHERE username = ?",
+    [username]
+  );
+  if (rows.length === 0) return res.status(401).json({ error: "invalid credentials" });
+  const ok = await bcrypt.compare(password, rows[0].password_hash);
+  if (!ok) return res.status(401).json({ error: "invalid credentials" });
+  const user = publicUser(rows[0]);
+  res.json({ token: sign({ id: user.id, username: user.username }), user });
+});
+
+app.post("/api/auth/change-password", auth, async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!current_password || !new_password) return res.status(400).json({ error: "current_password and new_password required" });
+  if (new_password.length < 6) return res.status(400).json({ error: "new password must be at least 6 characters" });
+  if (new_password === current_password) return res.status(400).json({ error: "new password must be different from current" });
+  const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
+  if (rows.length === 0) return res.status(404).json({ error: "user not found" });
+  const ok = await bcrypt.compare(current_password, rows[0].password_hash);
+  if (!ok) return res.status(401).json({ error: "current password is incorrect" });
+  const newHash = await bcrypt.hash(new_password, 10);
+  await pool.query("UPDATE users SET password_hash = ? WHERE id = ?", [newHash, req.user.id]);
+  res.json({ ok: true });
+});
+
+/* ---------- me ---------- */
+app.get("/api/me", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    "SELECT id, username, display_name, avatar_emoji, is_admin FROM users WHERE id = ?",
+    [req.user.id]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: "user not found" });
+  res.json({ user: publicUser(rows[0]) });
+});
+
+app.patch("/api/me", auth, async (req, res) => {
+  const { display_name, avatar_emoji } = req.body || {};
+  const fields = [];
+  const values = [];
+  if (display_name !== undefined) {
+    const dn = String(display_name || "").trim();
+    if (dn.length > 50) return res.status(400).json({ error: "display name too long" });
+    fields.push("display_name = ?");
+    values.push(dn || null);
+  }
+  if (avatar_emoji !== undefined) {
+    const ae = String(avatar_emoji || "").trim();
+    if (ae.length > 8) return res.status(400).json({ error: "emoji too long" });
+    fields.push("avatar_emoji = ?");
+    values.push(ae || null);
+  }
+  if (fields.length === 0) return res.status(400).json({ error: "nothing to update" });
+  values.push(req.user.id);
+  await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`, values);
+  const [rows] = await pool.query(
+    "SELECT id, username, display_name, avatar_emoji, is_admin FROM users WHERE id = ?",
+    [req.user.id]
+  );
+  res.json({ user: publicUser(rows[0]) });
+});
+
+/* ---------- settings sync ---------- */
+app.get("/api/settings", auth, async (req, res) => {
+  const [rows] = await pool.query("SELECT data, updated_at FROM user_settings WHERE user_id = ?", [req.user.id]);
+  if (rows.length === 0) return res.json({ data: null, updated_at: null });
+  let parsed = null;
+  try { parsed = typeof rows[0].data === "string" ? JSON.parse(rows[0].data) : rows[0].data; } catch(e){}
+  res.json({ data: parsed, updated_at: rows[0].updated_at });
+});
+
+app.post("/api/settings", auth, async (req, res) => {
+  const { data } = req.body || {};
+  if (!data || typeof data !== "object") return res.status(400).json({ error: "data object required" });
+  const json = JSON.stringify(data);
+  await pool.query(
+    `INSERT INTO user_settings (user_id, data) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = CURRENT_TIMESTAMP`,
+    [req.user.id, json]
+  );
+  res.json({ ok: true });
+});
+
+/* ---------- weak cards sync ---------- */
+app.get("/api/weak", auth, async (req, res) => {
+  const [rows] = await pool.query("SELECT card_id, misses FROM weak_cards WHERE user_id = ?", [req.user.id]);
+  res.json({ weak: rows });
+});
+
+app.post("/api/weak", auth, async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : null;
+  if (!items) return res.status(400).json({ error: "items array required" });
+  if (items.length === 0) return res.json({ ok: true });
+  const values = items.map(it => [req.user.id, Number(it.card_id), Math.max(0, Number(it.misses) || 0)]);
+  await pool.query(
+    `INSERT INTO weak_cards (user_id, card_id, misses) VALUES ?
+     ON DUPLICATE KEY UPDATE misses = VALUES(misses)`,
+    [values]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/weak/:cardId", auth, async (req, res) => {
+  await pool.query("DELETE FROM weak_cards WHERE user_id = ? AND card_id = ?", [req.user.id, Number(req.params.cardId)]);
+  res.json({ ok: true });
+});
+
+/* ---------- daily seen sync ---------- */
+app.get("/api/daily", auth, async (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0,10);
+  const [rows] = await pool.query(
+    "SELECT card_id FROM daily_seen WHERE user_id = ? AND seen_date = ?",
+    [req.user.id, date]
+  );
+  res.json({ date, cardIds: rows.map(r => r.card_id) });
+});
+
+app.post("/api/daily", auth, async (req, res) => {
+  const { date, cardIds } = req.body || {};
+  if (!date || !Array.isArray(cardIds)) return res.status(400).json({ error: "date and cardIds required" });
+  if (cardIds.length === 0) return res.json({ ok: true });
+  const values = cardIds.map(cid => [req.user.id, Number(cid), date]);
+  await pool.query("INSERT IGNORE INTO daily_seen (user_id, card_id, seen_date) VALUES ?", [values]);
+  res.json({ ok: true });
+});
+
+/* ---------- chapters ---------- */
+app.get("/api/chapters", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    "SELECT id, name, card_count, created_by, created_at, updated_at FROM chapters ORDER BY id ASC"
+  );
+  res.json({ chapters: rows });
+});
+
+app.get("/api/chapters/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  const [chRows] = await pool.query("SELECT * FROM chapters WHERE id = ?", [id]);
+  if (chRows.length === 0) return res.status(404).json({ error: "not found" });
+  const [cardRows] = await pool.query(
+    "SELECT id, position, kanji, reading, meaning, sentence FROM cards WHERE chapter_id = ? ORDER BY position ASC",
+    [id]
+  );
+  res.json({ chapter: chRows[0], cards: cardRows });
+});
+
+app.post("/api/chapters", auth, adminOnly, async (req, res) => {
+  const { name, cards } = req.body || {};
+  if (!name || !Array.isArray(cards) || cards.length === 0) return res.status(400).json({ error: "name and non-empty cards array required" });
+  const cleaned = cards.map(c => ({
+    k: (c.k || c.kanji || "").trim(),
+    r: (c.r || c.reading || "").trim(),
+    m: (c.m || c.meaning || "").trim(),
+    s: (c.s || c.sentence || "").trim(),
+  })).filter(c => c.k && c.r);
+  if (cleaned.length === 0) return res.status(400).json({ error: "no valid cards" });
+  const contentHash = hashChapter(name, cleaned);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [r] = await conn.query(
+      "INSERT INTO chapters (name, content_hash, card_count, created_by) VALUES (?, ?, ?, ?)",
+      [name, contentHash, cleaned.length, req.user.id]
+    );
+    const chapterId = r.insertId;
+    const values = cleaned.map((c, i) => [chapterId, i, c.k, c.r, c.m, c.s]);
+    await conn.query("INSERT INTO cards (chapter_id, position, kanji, reading, meaning, sentence) VALUES ?", [values]);
+    await conn.commit();
+    res.json({ id: chapterId, name, card_count: cleaned.length });
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === "ER_DUP_ENTRY") {
+      const [existing] = await pool.query("SELECT id, name, created_at FROM chapters WHERE content_hash = ?", [contentHash]);
+      return res.status(409).json({ error: "duplicate", existing: existing[0] || null });
+    }
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  } finally {
+    conn.release();
+  }
+});
+
+app.patch("/api/chapters/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const { name } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
+  const trimmed = name.trim();
+  if (trimmed.length > 200) return res.status(400).json({ error: "name too long" });
+  const [rows] = await pool.query("SELECT id FROM chapters WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "not found" });
+  await pool.query("UPDATE chapters SET name = ? WHERE id = ?", [trimmed, id]);
+  res.json({ ok: true, id, name: trimmed });
+});
+
+app.delete("/api/chapters/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query("SELECT id FROM chapters WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "not found" });
+  await pool.query("DELETE FROM chapters WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+/* ---------- progress ---------- */
+app.get("/api/progress", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    "SELECT card_id, box, due, misses, last_seen FROM progress WHERE user_id = ?",
+    [req.user.id]
+  );
+  res.json({ progress: rows });
+});
+
+app.post("/api/progress", auth, async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : null;
+  if (!items) return res.status(400).json({ error: "items array required" });
+  if (items.length === 0) return res.json({ ok: true, updated: 0 });
+  const values = items.map(it => [
+    req.user.id,
+    Number(it.card_id),
+    Math.max(0, Math.min(5, Number(it.box) || 0)),
+    it.due ? new Date(it.due) : null,
+    Math.max(0, Number(it.misses) || 0),
+    it.last_seen ? new Date(it.last_seen) : new Date(),
+  ]);
+  await pool.query(
+    `INSERT INTO progress (user_id, card_id, box, due, misses, last_seen)
+     VALUES ?
+     ON DUPLICATE KEY UPDATE
+       box = IF(VALUES(last_seen) >= last_seen, VALUES(box), box),
+       due = IF(VALUES(last_seen) >= last_seen, VALUES(due), due),
+       misses = IF(VALUES(last_seen) >= last_seen, VALUES(misses), misses),
+       last_seen = GREATEST(last_seen, VALUES(last_seen))`,
+    [values]
+  );
+  res.json({ ok: true, updated: items.length });
+});
+
+/* ---------- streaks ---------- */
+app.get("/api/streak", auth, async (req, res) => {
+  const [rows] = await pool.query("SELECT date FROM streaks WHERE user_id = ?", [req.user.id]);
+  res.json({ dates: rows.map(r => r.date.toISOString().slice(0, 10)) });
+});
+
+app.post("/api/streak", auth, async (req, res) => {
+  const dates = Array.isArray(req.body?.dates) ? req.body.dates : [];
+  if (dates.length === 0) return res.json({ ok: true });
+  const values = dates.map(d => [req.user.id, d]);
+  await pool.query("INSERT IGNORE INTO streaks (user_id, date) VALUES ?", [values]);
+  res.json({ ok: true });
+});
+
+/* ---------- static frontend ---------- */
+app.use(express.static(path.join(__dirname, "public")));
+app.get(/^\/(?!api\/).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* ---------- boot ---------- */
+(async () => {
+  try {
+    await pool.query("SELECT 1");
+    console.log("connected to MySQL");
+    await seedUsers();
+    const port = Number(process.env.PORT || 3000);
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`server listening on http://0.0.0.0:${port}`);
+      console.log(`open the app at http://localhost:${port}`);
+    });
+  } catch (e) {
+    console.error("startup failed:", e.message);
+    process.exit(1);
+  }
+})();
