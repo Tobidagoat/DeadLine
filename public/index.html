@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>N1 Trainer</title>
+<title>Deadline: JLPT drill</title>
 <style>
   :root {
     --bg: #faf8f5;
@@ -42,7 +42,7 @@
   }
 
   .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; padding-bottom: 12px; border-bottom: 1px solid var(--line); gap: 8px; }
-  .topbar h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
+  .topbar h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.01em; }
   .topbar h1 .accent { color: var(--seal); }
   .topbar-actions { display:flex; align-items:center; gap:6px; flex-shrink: 0; }
   .icon-btn { background: none; border: none; font-size: 19px; cursor: pointer; color: var(--ink); padding: 4px 6px; }
@@ -81,18 +81,21 @@
 
   .session-progress { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px; padding: 0 2px; }
 
-  .all-card { background: var(--accent-soft); color: var(--ink); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; display:flex; align-items:center; justify-content:space-between; gap: 10px; }
+  .all-card { background: var(--accent-soft); color: var(--ink); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px; }
+  .all-card .ac-row { display:flex; align-items:center; justify-content:space-between; gap: 10px; }
   .all-card .cname { font-weight: 700; font-size: 14px; }
   .all-card .mini-stat { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .all-card .ac-hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
   .all-card button { padding: 9px 16px; border-radius: 6px; border: none; background: var(--seal); color: white; font-weight: 700; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 
-  .focus-slider { margin-bottom: 14px; overflow: hidden; }
+  .focus-slider { margin-bottom: 12px; overflow: hidden; }
   .focus-track { display: flex; transition: transform .3s ease; touch-action: pan-y; }
   .focus-slide { flex: 0 0 100%; min-width: 0; }
   .focus-card { background: var(--ink); color: var(--paper); border-radius: 10px; padding: 16px 18px; text-align: center; }
   .focus-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #cbb9a8; font-weight: 700; margin-bottom: 4px; }
   .focus-name { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
   .focus-sub { font-size: 12px; color: #cbb9a8; margin-bottom: 12px; }
+  .focus-hint { font-size: 11px; color: #cbb9a8; line-height: 1.5; margin-top: 8px; }
   .focus-dots { display: flex; justify-content: center; gap: 6px; margin-top: 8px; }
   .focus-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); cursor: pointer; transition: all .2s; }
   .focus-dot.active { background: var(--seal); width: 16px; border-radius: 3px; }
@@ -107,8 +110,10 @@
   .current-card .cc-status-badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
   .current-card .cc-statusrow { display:flex; align-items:center; justify-content:space-between; margin-bottom: 14px; gap: 8px; }
   .current-card .cc-btnrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .current-card .cc-btnrow button { padding: 11px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-weight: 700; font-size: 12px; cursor: pointer; }
+  .current-card .cc-btnrow button { padding: 11px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-weight: 700; font-size: 12px; cursor: pointer; text-align: center; }
+  .current-card .cc-btnrow button .btn-sub { display: block; font-weight: 400; font-size: 9.5px; color: var(--muted); margin-top: 2px; line-height: 1.2; }
   .current-card .cc-btnrow button.primary { grid-column: 1 / -1; background: var(--seal); color: white; border: none; font-size: 14px; padding: 13px; }
+  .current-card .cc-btnrow button.primary .btn-sub { color: rgba(255,255,255,0.75); font-size: 10.5px; }
   .current-card .cc-btnrow button.primary:hover { background: var(--seal-dark); }
 
   .carousel-wrap { margin-bottom: 16px; overflow: hidden; position: relative; }
@@ -133,16 +138,19 @@
   .checkin-banner .cb-go { background: var(--seal); color: white; border: none; border-radius: 8px; padding: 11px 18px; font-size: 13px; font-weight: 700; cursor: pointer; flex: 1; }
   .checkin-banner .cb-skip { background: none; border: none; color: var(--muted); font-size: 11px; cursor: pointer; text-decoration: underline; padding: 8px 4px; }
 
-  .goal-strip { display: flex; align-items: center; gap: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
+  .goal-strip { display: flex; align-items: center; gap: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
   .goal-ring { position: relative; width: 42px; height: 42px; flex-shrink: 0; }
   .goal-ring svg { transform: rotate(-90deg); }
   .goal-ring .gr-bg { stroke: var(--line); }
   .goal-ring .gr-fill { stroke: var(--green); transition: stroke-dashoffset .4s; }
   .goal-ring .gr-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--ink); }
+  .goal-text { flex: 1; min-width: 0; }
   .goal-text .gt-title { font-size: 13px; font-weight: 700; }
   .goal-text .gt-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .goal-text .gt-hint { font-size: 10.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
 
   .list-toggle { text-align: center; font-size: 12px; color: var(--seal); font-weight: 700; cursor: pointer; padding: 12px; user-select: none; }
+  .list-hint { text-align: center; font-size: 11px; color: var(--muted); margin-top: -6px; margin-bottom: 8px; }
 
   .chapter-row { display: flex; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; cursor: pointer; transition: box-shadow .15s; }
   .chapter-row:hover { box-shadow: 0 4px 12px rgba(42,36,28,0.08); }
@@ -178,7 +186,7 @@
 
   .empty { text-align: center; padding: 36px 10px; }
   .empty .big { font-size: 38px; margin-bottom: 8px; }
-  .empty p { color: var(--muted); font-size: 13px; }
+  .empty p { color: var(--muted); font-size: 13px; line-height: 1.6; }
 
   .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
   .manage-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 4px; border-bottom: 1px solid var(--line); font-size: 13px; gap: 8px; }
@@ -242,10 +250,11 @@
   .login-wrap { max-width: 360px; margin: 30px auto; }
   .login-brand { text-align: center; margin-bottom: 22px; }
   .login-brand .brand-mark { font-size: 28px; line-height: 1; margin-bottom: 6px; }
-  .login-brand .brand-name { font-size: 24px; font-weight: 700; letter-spacing: 0.01em; color: var(--ink); }
+  .login-brand .brand-name { font-size: 22px; font-weight: 700; letter-spacing: 0.01em; color: var(--ink); }
   .login-brand .brand-name .accent { color: var(--seal); }
   .login-brand .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.16em; text-transform: uppercase; margin-top: 4px; }
   .login-card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 26px 22px; box-shadow: 0 8px 20px rgba(42,36,28,0.06); }
+  .login-explainer { font-size: 12px; color: #4a4232; line-height: 1.6; margin-bottom: 16px; padding: 10px 12px; background: var(--accent-soft); border-radius: 8px; }
   .login-card .welcome-back { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); margin-bottom: 16px; }
   .login-card .welcome-back .wb-text { font-size: 13px; }
   .login-card .welcome-back .wb-text b { font-weight: 700; }
@@ -281,6 +290,31 @@
 
   .admin-badge { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: var(--seal); color: white; padding: 2px 6px; border-radius: 4px; vertical-align: middle; margin-left: 6px; }
 
+  /* onboarding slides */
+  .onboard-wrap { max-width: 380px; margin: 20px auto; }
+  .onboard-card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 32px 24px; box-shadow: 0 8px 24px rgba(42,36,28,0.08); text-align: center; min-height: 320px; display: flex; flex-direction: column; }
+  .onboard-icon { font-size: 52px; margin-bottom: 16px; }
+  .onboard-title { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+  .onboard-body { font-size: 14px; color: #4a4232; line-height: 1.7; flex: 1; }
+  .onboard-body p { margin: 0 0 12px; }
+  .onboard-body ul { text-align: left; margin: 8px 0; padding-left: 20px; }
+  .onboard-body li { margin-bottom: 6px; line-height: 1.5; }
+  .onboard-dots { display: flex; justify-content: center; gap: 6px; margin: 16px 0; }
+  .onboard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .onboard-dot.active { background: var(--seal); }
+  .onboard-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .onboard-actions button { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .onboard-next { background: var(--seal); color: white; }
+  .onboard-skip { background: none; color: var(--muted); border: 1px solid var(--line) !important; }
+
+  /* how-it-works page */
+  .hiw h2 { font-size: 16px; margin: 20px 0 8px; }
+  .hiw h2:first-child { margin-top: 0; }
+  .hiw p { font-size: 13px; color: #4a4232; line-height: 1.7; margin: 0 0 10px; }
+  .hiw ul { margin: 0 0 12px; padding-left: 20px; }
+  .hiw li { font-size: 13px; color: #4a4232; line-height: 1.6; margin-bottom: 6px; }
+  .hiw .highlight { background: var(--accent-soft); padding: 10px 12px; border-radius: 8px; font-size: 12.5px; color: #4a4232; line-height: 1.6; }
+
   @media (min-width: 720px) {
     body { padding: 32px 24px 56px; }
     .wrap { max-width: 920px; }
@@ -297,7 +331,7 @@
 <body>
 <div class="wrap">
   <div class="topbar" id="topbar">
-    <h1>N1 Trainer <span class="accent">·</span> 動詞帳</h1>
+    <h1>Deadline <span class="accent">·</span> JLPT drill</h1>
     <div class="topbar-actions">
       <span class="status-pill" id="statusPill" style="display:none;"></span>
       <button class="streak-badge" id="streakBadge" title="Stats & streak" style="display:none;"></button>
@@ -315,12 +349,15 @@
 <script>
 /* ================= config ================= */
 const API_BASE = "";
+const APP_NAME = "Deadline: JLPT drill";
+const EXAM_NAME = "JLPT N1";
 const FIXED_EXAM_DATE = "2026-12-06";
 const FIXED_TOTAL_CHAPTERS = 31;
 const EMOJI_PALETTE = ["🌸","🌼","🌻","🌷","🌹","🌱","🍀","🌿","🌊","🔥","⭐","🌙","☀️","❄️","🍡","🍙"];
 const DEFAULT_EMOJI = "🌱";
 const LAST_USERNAME_KEY = "kanji-last-username-v1";
 const SPRINT_SKIP_DATE_KEY = "kanji-sprint-skip-date-v1";
+const ONBOARDED_KEY = "kanji-onboarded-v1";
 
 const MAX_BOX = 3;
 const SOLID_THRESHOLD = 0.70;
@@ -437,6 +474,12 @@ function getSprintSkipDate(){
 function setSprintSkipDate(dateStr){
   try { localStorage.setItem(SPRINT_SKIP_DATE_KEY, dateStr); } catch(e){}
 }
+function hasOnboarded(){
+  try { return localStorage.getItem(ONBOARDED_KEY) === "1"; } catch(e){ return false; }
+}
+function setOnboarded(){
+  try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch(e){}
+}
 
 function userDisplayName(){
   if (!authUser) return "";
@@ -452,6 +495,10 @@ function isAdmin(){
 function avatarHtml(size){
   const cls = size ? " " + size : "";
   return `<span class="avatar-bubble${cls}">${userEmoji()}</span>`;
+}
+function cleanChapterName(name){
+  // strip hyphen+space so "Chapter -1" displays as "Chapter 1"
+  return String(name).replace(/^(Chapter)\s*-\s*(\d+)/i, "$1 $2");
 }
 
 async function api(path, opts = {}){
@@ -606,7 +653,6 @@ async function syncNow(opts = {}){
   syncing = true;
   setStatus("syncing", "syncing…");
   try {
-    // --- push progress ---
     const dirtyItems = Object.entries(progress)
       .filter(([_, p]) => p.dirty)
       .map(([cardKeyStr, p]) => {
@@ -625,20 +671,14 @@ async function syncNow(opts = {}){
         await storeSet(K_LOCAL_PROGRESS, JSON.stringify(progress));
       } else if (r.status === 401) { handleAuthExpired(); return; }
     }
-
-    // --- push streaks ---
     if (dirtyStreakDates.size > 0) {
       const r = await api("/api/streak", { method: "POST", body: JSON.stringify({ dates: Array.from(dirtyStreakDates) }) });
       if (r.ok) { dirtyStreakDates.clear(); await saveLocalStreaks(); }
     }
-
-    // --- push settings if dirty ---
     if (settingsDirty) {
       const r = await api("/api/settings", { method: "POST", body: JSON.stringify({ data: settings }) });
       if (r.ok) { settingsDirty = false; await storeSet(K_SETTINGS_DIRTY, "0"); }
     }
-
-    // --- push weak if dirty ---
     if (weakDirty) {
       const weakItems = Object.keys(weakStats)
         .map(id => {
@@ -647,9 +687,6 @@ async function syncNow(opts = {}){
           return { card_id: v.serverCardId, misses: weakStats[id].misses || 0 };
         })
         .filter(Boolean);
-      // Also need to handle deletions: if a card was removed from weakStats locally, it should be removed from server too.
-      // We don't have a clean way to know deletions, so we just push the current full list. Server-side we could diff.
-      // Simpler: send the full list, server replaces only entries we send.
       if (weakItems.length > 0) {
         const r = await api("/api/weak", { method: "POST", body: JSON.stringify({ items: weakItems }) });
         if (r.ok) { weakDirty = false; await storeSet(K_WEAK_DIRTY, "0"); }
@@ -657,8 +694,6 @@ async function syncNow(opts = {}){
         weakDirty = false; await storeSet(K_WEAK_DIRTY, "0");
       }
     }
-
-    // --- push daily ---
     ensureDailyIsToday();
     if (dailyData.seen.length > 0) {
       const dailyCardIds = dailyData.seen
@@ -671,8 +706,6 @@ async function syncNow(opts = {}){
         await api("/api/daily", { method: "POST", body: JSON.stringify({ date: dailyData.date, cardIds: dailyCardIds }) });
       }
     }
-
-    // --- pull chapters ---
     const listRes = await api("/api/chapters");
     if (!listRes.ok) {
       if (listRes.status === 401) { handleAuthExpired(); return; }
@@ -703,8 +736,6 @@ async function syncNow(opts = {}){
     await saveLocalChapters();
     rebuildVocab();
     await saveLocalProgress();
-
-    // --- pull progress ---
     const pRes = await api("/api/progress");
     if (pRes.ok) {
       const serverProgress = pRes.body.progress || [];
@@ -722,25 +753,18 @@ async function syncNow(opts = {}){
       }
       await saveLocalProgress();
     }
-
-    // --- pull streaks ---
     const sRes = await api("/api/streak");
     if (sRes.ok) {
       (sRes.body.dates || []).forEach(d => { streakDates[d] = true; });
       await saveLocalStreaks();
     }
-
-    // --- pull settings (only if we're NOT dirty) ---
     if (!settingsDirty) {
       const setRes = await api("/api/settings");
       if (setRes.ok && setRes.body.data) {
-        const remote = setRes.body.data;
-        settings = Object.assign(deepClone(DEFAULT_SETTINGS), remote);
+        settings = Object.assign(deepClone(DEFAULT_SETTINGS), setRes.body.data);
         await storeSet(K_SETTINGS, JSON.stringify(settings));
       }
     }
-
-    // --- pull weak (merge by max misses, only if NOT dirty) ---
     if (!weakDirty) {
       const wRes = await api("/api/weak");
       if (wRes.ok) {
@@ -750,17 +774,11 @@ async function syncNow(opts = {}){
           if (!v) continue;
           const local = weakStats[v.id];
           const localMisses = local ? local.misses : 0;
-          if (wr.misses > localMisses) {
-            weakStats[v.id] = { misses: wr.misses };
-          }
+          if (wr.misses > localMisses) weakStats[v.id] = { misses: wr.misses };
         }
-        // also remove local entries that have 0 misses server-side (i.e. server cleared them)
-        // — skip this for now, harmless to keep.
         await storeSet(K_WEAKSTATS, JSON.stringify(weakStats));
       }
     }
-
-    // --- pull daily for today ---
     const dRes = await api("/api/daily?date=" + encodeURIComponent(todayKey()));
     if (dRes.ok) {
       ensureDailyIsToday();
@@ -773,11 +791,8 @@ async function syncNow(opts = {}){
       }
       if (added) await saveDaily();
     }
-
-    // --- refresh me ---
     const meRes = await api("/api/me");
     if (meRes.ok && meRes.body.user) { updateCachedUser(meRes.body.user); updateUserLine(); }
-
     lastSyncAt = Date.now();
     setStatus("online", "synced");
     showTopbar(true);
@@ -872,9 +887,9 @@ function chapterStatus(chapterId){
   const m = chapterMastery(chapterId);
   const anyAboveZero = chapterCards(chapterId).some(v => (progress[v.id]?.box || 0) > 0);
   if (!anyAboveZero) return { key: "none", label: "Not started", cls: "status-none", sub: "start studying" };
-  if (m.ratio3 >= MASTER_THRESHOLD) return { key: "mastered", label: "Mastered", cls: "status-mastered", sub: `${m.box3}/${m.total} locked` };
-  if (m.ratio2 >= SOLID_THRESHOLD) return { key: "solid", label: "Solid", cls: "status-solid", sub: `${m.box2Plus}/${m.total} at box 2+` };
-  return { key: "practicing", label: "Practicing", cls: "status-practicing", sub: `${m.box2Plus}/${m.total} at box 2+` };
+  if (m.ratio3 >= MASTER_THRESHOLD) return { key: "mastered", label: "Mastered", cls: "status-mastered", sub: `${m.box3}/${m.total} learned` };
+  if (m.ratio2 >= SOLID_THRESHOLD) return { key: "solid", label: "Solid", cls: "status-solid", sub: `${m.box2Plus}/${m.total} getting there` };
+  return { key: "practicing", label: "Practicing", cls: "status-practicing", sub: `${m.box2Plus}/${m.total} getting there` };
 }
 function isMastered(chapterId){ return chapterStatus(chapterId).key === "mastered"; }
 function isUnlocked(chapterId){
@@ -923,7 +938,7 @@ function detectDemotions(){
     if (prev === "mastered" && cur !== "mastered") demoted.push(ch);
     previousChapterStatuses[ch.id] = cur;
   });
-  if (demoted.length) toast(`📉 ${demoted.map(c => c.name).join(", ")} lost Mastered`);
+  if (demoted.length) toast(`📉 ${demoted.map(c => cleanChapterName(c.name)).join(", ")} lost Mastered`);
 }
 
 function weakPoolIds(){
@@ -1028,6 +1043,124 @@ function buildMCChoices(correctCard){
   return shuffleArr(choices);
 }
 
+/* ================= ONBOARDING ================= */
+let onboardSlide = 0;
+function renderOnboarding(){
+  screen = "onboarding";
+  showTopbar(false);
+  const app = document.getElementById("app");
+  const slides = [
+    {
+      icon: "📚",
+      title: "Welcome to Deadline",
+      body: `<p>This is a shared study app for the <b>${EXAM_NAME}</b> exam on <b>${FIXED_EXAM_DATE}</b>.</p>
+      <p>You and everyone else study the same chapters. Your progress is yours alone.</p>`
+    },
+    {
+      icon: "🗂️",
+      title: "Chapters unlock as you go",
+      body: `<p>Every chapter has 40-50 verbs. Study them one at a time.</p>
+      <p>Once a chapter is Solid, the next one unlocks. Once it's Mastered, it moves to your Collection.</p>`
+    },
+    {
+      icon: "⚡",
+      title: "Quick Sessions are the core",
+      body: `<p>Each Quick Session shows you cards from the current chapter.</p>
+      <p>Get a card <b>right</b> → it climbs a level. Get it <b>wrong</b> → it drops back and reappears later.</p>
+      <p>Cards need 3 correct recalls (on different days) to be Mastered.</p>`
+    },
+    {
+      icon: "🎯",
+      title: "Every day counts",
+      body: `<p>There's a <b>daily goal</b> (default 20 cards). Hit it to keep your streak alive.</p>
+      <p>Don't rush. Consistency beats cramming. The exam is a marathon, not a sprint.</p>
+      <p>That's it. Let's go.</p>`
+    }
+  ];
+  const total = slides.length;
+  const s = slides[onboardSlide];
+  const isLast = onboardSlide === total - 1;
+  const dots = slides.map((_, i) => `<div class="onboard-dot ${i === onboardSlide ? "active" : ""}"></div>`).join("");
+  app.innerHTML = `<div class="onboard-wrap">
+    <div class="onboard-card">
+      <div class="onboard-icon">${s.icon}</div>
+      <div class="onboard-title">${s.title}</div>
+      <div class="onboard-body">${s.body}</div>
+      <div class="onboard-dots">${dots}</div>
+      <div class="onboard-actions">
+        <button class="onboard-skip" id="onboardSkip">Skip</button>
+        <button class="onboard-next" id="onboardNext">${isLast ? "Start studying →" : "Next →"}</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById("onboardSkip").addEventListener("click", ()=>{
+    setOnboarded();
+    renderHome();
+  });
+  document.getElementById("onboardNext").addEventListener("click", ()=>{
+    if (isLast) {
+      setOnboarded();
+      renderHome();
+    } else {
+      onboardSlide++;
+      renderOnboarding();
+    }
+  });
+}
+
+/* ================= HOW IT WORKS ================= */
+function renderHowItWorks(){
+  screen = "howitworks";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">How it works</span></div>
+    <div class="panel hiw">
+      <h2>What is this app?</h2>
+      <p>Deadline is a spaced-repetition study tool for the <b>${EXAM_NAME}</b> exam on <b>${FIXED_EXAM_DATE}</b>. It drills the verb kanji from your textbook, chapter by chapter.</p>
+      <p>Chapters are <b>shared</b> — everyone studies the same cards. But your <b>progress is private</b>. What you get right, what you get wrong, is yours alone.</p>
+
+      <h2>How a session works</h2>
+      <p>Tap <b>⚡ Quick Session</b> on the current chapter. You'll pick an input mode:</p>
+      <ul>
+        <li><b>Flashcard</b> — see the kanji, tap to reveal, grade yourself Correct or Wrong.</li>
+        <li><b>Multiple Choice</b> — see the kanji, pick the right reading from 4 options.</li>
+      </ul>
+
+      <h2>How cards level up</h2>
+      <p>Every card has a <b>level</b> from 0 to 3. Higher = more solid.</p>
+      <ul>
+        <li>Get a card <b>right</b> → level +1 (max 3).</li>
+        <li>Get a card <b>wrong</b> → drops back to level 1 (or stays at 0 if new).</li>
+        <li>To hit level 3, a card must have been seen on a <b>different day</b> at level 2. That means mastery takes at least <b>3 days</b>.</li>
+      </ul>
+
+      <h2>Chapter statuses</h2>
+      <ul>
+        <li><b>Not started</b> — you haven't studied this chapter yet.</li>
+        <li><b>Practicing</b> — you've started, but fewer than 70% of cards are at level 2+.</li>
+        <li><b>Solid</b> — 70% or more of cards are at level 2+. The next chapter unlocks.</li>
+        <li><b>Mastered</b> — 90% or more are at level 3. The chapter moves to your Collection.</li>
+      </ul>
+
+      <h2>What's on the home screen</h2>
+      <ul>
+        <li><b>Exam countdown</b> — how many days until the test.</li>
+        <li><b>Daily goal</b> — study this many cards today to keep your streak.</li>
+        <li><b>Check-in banner</b> — appears when an earlier chapter still has cards you can advance today.</li>
+        <li><b>Current chapter</b> — the one you're working on. Swipe to see unlocked chapters.</li>
+        <li><b>Weak words</b> — cards you've gotten wrong. Practice these extra.</li>
+        <li><b>Mastered</b> — chapters you've locked in. They stay there, safe.</li>
+      </ul>
+
+      <h2>What does "Mastered can fall" mean?</h2>
+      <p>If you practice a Mastered chapter and get cards wrong, those cards drop down. If enough drop that the chapter falls below 90%, it <b>loses Mastered status</b> and returns to your active list.</p>
+      <p>That's not a punishment — that's the app reminding you that memory fades. It's better to catch it before the exam.</p>
+
+      <div class="highlight">💡 <b>Tip:</b> Consistency beats cramming. Twenty minutes a day for 6 months will beat ten hours the week before the exam. Every time.</div>
+    </div>`;
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+}
+
 /* ================= LOGIN ================= */
 function renderLogin(mode){
   mode = mode || "login";
@@ -1041,14 +1174,21 @@ function renderLogin(mode){
         <div class="wb-text">Welcome back, <b>${lastUsername}</b></div>
       </div>`
     : "";
+  const explainer = (mode === "register")
+    ? `<div class="login-explainer">
+        <b>What you're signing up for:</b><br>
+        A shared ${EXAM_NAME} study tool. Chapters are shared with everyone; your progress is private. No email needed.
+      </div>`
+    : "";
   app.innerHTML = `<div class="login-wrap">
     <div class="login-brand">
-      <div class="brand-mark">🌸</div>
-      <div class="brand-name">N1 Trainer <span class="accent">·</span> 動詞帳</div>
-      <div class="brand-sub">Kanji &amp; Verb SRS</div>
+      <div class="brand-mark">🎯</div>
+      <div class="brand-name">Deadline <span class="accent">·</span> JLPT drill</div>
+      <div class="brand-sub">${EXAM_NAME} · ${FIXED_EXAM_DATE}</div>
     </div>
     <div class="login-card">
       ${welcomeBack}
+      ${explainer}
       <label>Username</label>
       <input id="usernameInput" autocomplete="username" autocapitalize="off" value="${mode === "login" ? lastUsername.replace(/"/g,'&quot;') : ""}">
       <label>Password</label>
@@ -1117,7 +1257,13 @@ async function afterLogin(){
     renderHome();
   } });
   if (screen !== "home" && screen !== "profile") renderHome();
-  if (!authUser.display_name && !authUser.avatar_emoji) setTimeout(()=> renderProfile({ firstTime: true }), 300);
+  // first-time onboarding
+  if (!hasOnboarded()) {
+    onboardSlide = 0;
+    setTimeout(()=> renderOnboarding(), 200);
+  } else if (!authUser.display_name && !authUser.avatar_emoji) {
+    setTimeout(()=> renderProfile({ firstTime: true }), 300);
+  }
   setInterval(()=> {
     if (authToken && !syncing) {
       syncNow({ afterSync: () => { if (screen === "home") renderHome(); } });
@@ -1144,9 +1290,9 @@ function drawProfile(firstTime){
     `<button class="emoji-pick ${e === profileDraft.avatar_emoji ? "selected" : ""}" data-emoji="${e}">${e}</button>`
   ).join("");
   app.innerHTML = `
-    <div class="backrow"><button id="backBtn">← ${firstTime ? "skip" : "home"}</button><span class="screen-title">${firstTime ? "Welcome" : "Profile"}</span></div>
+    <div class="backrow"><button id="backBtn">← ${firstTime ? "skip" : "home"}</button><span class="screen-title">${firstTime ? "Set up your profile" : "Profile"}</span></div>
     <div class="panel">
-      ${firstTime ? `<div style="font-size:13px;color:#4a4232;margin-bottom:14px;line-height:1.6;">Welcome to N1 Trainer! Pick an emoji and set a display name so your friend knows it's you.</div>` : ""}
+      ${firstTime ? `<div style="font-size:13px;color:#4a4232;margin-bottom:14px;line-height:1.6;">Pick an emoji and set a display name so other people can tell it's you.</div>` : ""}
       <div class="profile-head">
         <div class="avatar-bubble xl" id="draftEmoji">${profileDraft.avatar_emoji}</div>
         <div style="font-size:12px;color:var(--muted);">Logged in as <b>${authUser.username}</b>${authUser.is_admin ? '<span class="admin-badge">admin</span>' : ""}</div>
@@ -1263,6 +1409,7 @@ function renderMenu(){
       </div>
     </div>
     <div class="panel" style="padding:6px 0;">
+      <div class="menu-item" id="m-how" style="padding:14px 16px;">💡 How it works</div>
       <div class="menu-item" id="m-profile" style="padding:14px 16px;">👤 Profile</div>
       <div class="menu-item" id="m-changepw" style="padding:14px 16px;">🔑 Change password</div>
       <div class="menu-item" id="m-collection" style="padding:14px 16px;">🏆 Mastered chapters</div>
@@ -1277,6 +1424,7 @@ function renderMenu(){
     </div>
   `;
   document.getElementById("backBtn").addEventListener("click", renderHome);
+  document.getElementById("m-how").addEventListener("click", renderHowItWorks);
   document.getElementById("m-profile").addEventListener("click", ()=> renderProfile());
   document.getElementById("m-changepw").addEventListener("click", renderChangePassword);
   document.getElementById("m-collection").addEventListener("click", renderCollection);
@@ -1306,15 +1454,19 @@ function buildFocusSlides(){
   const slides = [];
   if (FIXED_EXAM_DATE) {
     const days = daysUntil(FIXED_EXAM_DATE);
+    const d = new Date(FIXED_EXAM_DATE + "T00:00:00");
+    const weekday = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()];
     slides.push(`<div class="focus-label">📅 Exam countdown</div>
-      <div class="focus-name">${days > 0 ? days + " day" + (days===1?"":"s") + " left" : days === 0 ? "It's today!" : "Exam day has passed"}</div>
-      <div class="focus-sub">${FIXED_EXAM_DATE}</div>`);
+      <div class="focus-name">${days > 0 ? days + " day" + (days===1?"":"s") + " until " + EXAM_NAME : days === 0 ? "It's today!" : "Exam day has passed"}</div>
+      <div class="focus-sub">${FIXED_EXAM_DATE} (${weekday})</div>
+      <div class="focus-hint">${days > 60 ? "Plenty of time. Steady pace wins." : days > 30 ? "Getting close. Stay consistent." : days > 0 ? "Final stretch. Review what you've got." : ""}</div>`);
   }
   const total = FIXED_TOTAL_CHAPTERS;
   const mastered = chapters.filter(ch => isMastered(ch.id)).length;
   slides.push(`<div class="focus-label">📖 Progress</div>
     <div class="focus-name">${mastered} / ${total} chapters mastered</div>
-    <div class="focus-sub">${Math.round(100*mastered/total)}% of your syllabus</div>`);
+    <div class="focus-sub">${Math.round(100*mastered/total)}% of your syllabus</div>
+    <div class="focus-hint">A chapter is mastered when 90% of its cards have been recalled correctly on 3 different days.</div>`);
   return slides;
 }
 function renderFocusSlider(){
@@ -1388,6 +1540,7 @@ function renderDailyGoal(){
     <div class="goal-text">
       <div class="gt-title">Daily goal</div>
       <div class="gt-sub">${done} / ${goal} cards today${done >= goal ? " · done!" : ""}</div>
+      <div class="gt-hint">Study ${goal} cards today to keep your streak alive.</div>
     </div>
   </div>`;
 }
@@ -1407,16 +1560,16 @@ function renderCheckinBanner(){
   if (!first) return "";
   const count = pending.length;
   const title = count === 1
-    ? `⚠️ ${first.name} is due for a check-in`
+    ? `⚠️ ${cleanChapterName(first.name)} is due for a check-in`
     : `⚠️ ${count} chapters waiting for check-in`;
   const sub = count === 1
     ? `Some cards can still advance today. Finish it before it rots.`
-    : `You're pushing ahead without locking in the basics. Start with ${first.name}.`;
+    : `You're pushing ahead without locking in the basics. Start with ${cleanChapterName(first.name)}.`;
   return `<div class="checkin-banner">
     <div class="cb-title">${title}</div>
     <div class="cb-sub">${sub}</div>
     <div class="cb-actions">
-      <button class="cb-go" id="checkinGo" data-ch="${first.id}">Start with ${first.name} →</button>
+      <button class="cb-go" id="checkinGo" data-ch="${first.id}">Start with ${cleanChapterName(first.name)} →</button>
     </div>
     <div style="text-align:right;"><button class="cb-skip" id="checkinSkip">ignore for today</button></div>
   </div>`;
@@ -1428,23 +1581,23 @@ function renderCurrentChapterCard(chapterId){
   const st = chapterStatus(ch.id);
   const m = chapterMastery(ch.id);
   const pctMastered = m.total ? Math.round(100 * m.ratio3) : 0;
-  const pctSolid = m.total ? Math.round(100 * m.ratio2) : 0;
+  const displayName = cleanChapterName(ch.name);
   return `<div class="current-card" data-ch="${ch.id}">
     <div class="cc-toprow">
       <div class="cc-number">${chapterNumberFromName(ch.name)}</div>
     </div>
-    <div class="cc-name">${ch.name}</div>
-    <div class="cc-sub">${ch.cards.length} verbs · ${m.box2Plus} at box 2+, ${m.box3} mastered</div>
+    <div class="cc-name">${displayName}</div>
+    <div class="cc-sub">${ch.cards.length} verbs · ${m.box3} of ${m.total} mastered</div>
     <div class="cc-progressbar"><div style="width:${pctMastered}%"></div></div>
     <div class="cc-statusrow">
       <span class="cc-status-badge ${st.cls}">${st.label}</span>
-      <span style="font-size:11px;color:var(--muted);">${pctMastered}% mastered · ${pctSolid}% solid</span>
+      <span style="font-size:11px;color:var(--muted);">${pctMastered}% mastered</span>
     </div>
     <div class="cc-btnrow">
-      <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session</button>
-      <button data-mode="browse" data-ch="${ch.id}">👁 Browse</button>
-      <button data-mode="learn" data-ch="${ch.id}">📘 Learn</button>
-      <button data-mode="review-mastered" data-ch="${ch.id}">🎯 Review</button>
+      <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
+      <button data-mode="browse" data-ch="${ch.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
+      <button data-mode="learn" data-ch="${ch.id}">📘 Learn<span class="btn-sub">study in small batches</span></button>
+      <button data-mode="review-mastered" data-ch="${ch.id}">🎯 Review<span class="btn-sub">practice this chapter</span></button>
     </div>
   </div>`;
 }
@@ -1569,20 +1722,33 @@ function renderHome(){
 
   const weakCount = weakPoolIds().length;
   html += `<div class="all-card">
-      <div><div class="cname">⚠️ Weak words</div><div class="mini-stat">${weakCount ? weakCount + " word" + (weakCount>1?"s":"") + " need extra practice" : "none right now — nice"}</div></div>
-      <button id="weakReviewBtn">Practice</button>
+      <div class="ac-row">
+        <div>
+          <div class="cname">⚠️ Weak words</div>
+          <div class="mini-stat">${weakCount ? weakCount + " word" + (weakCount>1?"s":"") + " need extra practice" : "none right now — nice"}</div>
+        </div>
+        <button id="weakReviewBtn">Practice</button>
+      </div>
+      <div class="ac-hint">Words you've gotten wrong before. Practice these extra to lock them in.</div>
     </div>`;
 
   const masteredChapters = chapters.filter(ch => isMastered(ch.id));
   if (masteredChapters.length > 0) {
     const totalMasteredCards = masteredChapters.reduce((s, ch) => s + ch.cards.length, 0);
     html += `<div class="all-card" style="background: var(--green-soft);">
-      <div><div class="cname">🏆 Mastered</div><div class="mini-stat">${masteredChapters.length} chapter${masteredChapters.length>1?"s":""} · ${totalMasteredCards} cards locked in</div></div>
-      <button id="masteredBtn" style="background: var(--green);">Review</button>
+      <div class="ac-row">
+        <div>
+          <div class="cname">🏆 Mastered</div>
+          <div class="mini-stat">${masteredChapters.length} chapter${masteredChapters.length>1?"s":""} · ${totalMasteredCards} cards</div>
+        </div>
+        <button id="masteredBtn" style="background: var(--green);">Review</button>
+      </div>
+      <div class="ac-hint">Chapters you've fully locked in. They stay here, safe. You can always come back to review them.</div>
     </div>`;
   }
 
   html += `<div class="list-toggle" id="listToggle">▾ All chapters (${chapters.length})</div>`;
+  html += `<div class="list-hint">Tap to see every chapter and its progress</div>`;
   html += `<div id="allChaptersList" style="display:none;">`;
   chapters.forEach((ch, idx)=>{
     const st = chapterStatus(ch.id);
@@ -1590,11 +1756,12 @@ function renderHome(){
     const lockedCls = unlocked ? "" : " locked";
     const tabCls = st.key === "mastered" ? "chapter-tab mastered" : (unlocked ? "chapter-tab" : "chapter-tab locked");
     const m = chapterMastery(ch.id);
+    const displayName = cleanChapterName(ch.name);
     html += `<div class="chapter-row${lockedCls}" data-goto="${ch.id}">
       <div class="${tabCls}">${idx+1}</div>
       <div class="chapter-body">
         <div class="chapter-head">
-          <div><div class="cname">${ch.name}</div><div class="ccount">${ch.cards.length} verbs · ${m.box3}/${m.total} mastered</div></div>
+          <div><div class="cname">${displayName}</div><div class="ccount">${ch.cards.length} verbs · ${m.box3}/${m.total} mastered</div></div>
           <div style="text-align:right;">
             <span class="status-badge ${st.cls}">${unlocked ? st.label : "Locked"}</span>
           </div>
@@ -1665,7 +1832,7 @@ function renderCollection(){
     const m = chapterMastery(ch.id);
     const stragglerCount = chapterCards(ch.id).filter(v => (progress[v.id]?.box || 0) < MAX_BOX).length;
     return `<div class="manage-row">
-      <span class="rname">${ch.name} <span style="color:var(--muted);font-weight:400;">(${m.box3}/${m.total})</span>
+      <span class="rname">${cleanChapterName(ch.name)} <span style="color:var(--muted);font-weight:400;">(${m.box3}/${m.total})</span>
         ${stragglerCount ? `<div style="font-size:10.5px;color:var(--amber);margin-top:2px;">${stragglerCount} card${stragglerCount>1?"s":""} not yet locked</div>` : ""}
       </span>
       <div class="manage-actions">
@@ -1682,7 +1849,7 @@ function renderCollection(){
       </div>
       ${mastered.length ? `<button class="small-btn" id="reviewMasteredBtn">🎯 Review all mastered chapters</button>` : ""}
     </div>
-    ${mastered.length ? `<div class="panel">${rows}</div>` : `<div class="card"><div class="empty"><div class="big">🌱</div><div style="font-size:15px;font-weight:700;">No mastered chapters yet</div><p>When a chapter hits 90% at box 3, it'll appear here.</p></div></div>`}
+    ${mastered.length ? `<div class="panel">${rows}</div>` : `<div class="card"><div class="empty"><div class="big">🌱</div><div style="font-size:15px;font-weight:700;">No mastered chapters yet</div><p>When a chapter hits 90% at level 3, it'll move here. Study the current chapter in Quick Sessions to get there.</p></div></div>`}
   `;
   document.getElementById("backBtn").addEventListener("click", renderHome);
   const reviewBtn = document.getElementById("reviewMasteredBtn");
@@ -1713,7 +1880,7 @@ function startReviewMastered(chapterId){
     });
   const queue = [...shuffleArr(stragglers), ...shuffleArr(refresh).slice(0, 20)];
   if (queue.length === 0) queue.push(...shuffleArr(pool).slice(0, 15));
-  launchQuickWithQueue(queue, chapterId ? chapterById(chapterId).name : "Mastered review", true);
+  launchQuickWithQueue(queue, chapterId ? cleanChapterName(chapterById(chapterId).name) : "Mastered review", true);
 }
 
 /* ================= QUICK PICKER ================= */
@@ -1724,20 +1891,20 @@ function startQuickPicker(chapterId){
   const ch = chapterById(chapterId);
   const app = document.getElementById("app");
   app.innerHTML = `
-    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Quick · ${ch.name}</span></div>
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Quick · ${cleanChapterName(ch.name)}</span></div>
     <div style="text-align:center;margin:14px 0 20px;">
-      <div style="font-size:14px;color:var(--muted);">Choose input method</div>
+      <div style="font-size:14px;color:var(--muted);">Choose how you want to be tested</div>
     </div>
     <div class="picker-row">
       <div class="picker-card" id="pickFlash">
         <div class="pc-icon">📇</div>
         <div class="pc-title">Flashcard</div>
-        <div class="pc-sub">Tap to reveal reading &amp; meaning</div>
+        <div class="pc-sub">See the kanji, tap to reveal the answer, grade yourself.</div>
       </div>
       <div class="picker-card" id="pickMC">
         <div class="pc-icon">🎯</div>
         <div class="pc-title">Multiple choice</div>
-        <div class="pc-sub">Pick the reading from 4 options</div>
+        <div class="pc-sub">See the kanji, pick the right reading from 4 options.</div>
       </div>
     </div>
   `;
@@ -1758,7 +1925,7 @@ function startQuick(chapterId, inputMode){
   quickChapterId = chapterId;
   quickIsReview = false;
   const queue = buildQuickQueue(chapterId);
-  launchQuickWithQueue(queue, chapterById(chapterId).name, false);
+  launchQuickWithQueue(queue, cleanChapterName(chapterById(chapterId).name), false);
 }
 function launchQuickWithQueue(queue, label, isReview){
   screen = "quick";
@@ -1783,7 +1950,7 @@ function renderQuick(){
       const pct2 = m.total ? Math.round(100 * m.ratio2) : 0;
       if (m.ratio3 >= MASTER_THRESHOLD) milestoneText = `🏆 ${m.box3}/${m.total} cards mastered — chapter locked in!`;
       else if (m.ratio2 >= SOLID_THRESHOLD) milestoneText = `${pct3}% mastered · next: 90% to lock in`;
-      else milestoneText = `${pct2}% at box 2+ · aim for 70% to reach Solid`;
+      else milestoneText = `${pct2}% getting there · aim for 70% to reach Solid`;
     }
     app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">${quickIsReview ? "Review" : "Quick"} · ${quickChapterLabel}</span></div>
       <div class="card"><div class="empty"><div class="big">🏁</div>
@@ -1816,7 +1983,7 @@ function renderQuick(){
       <div class="session-progress"><span>${doneCount} / ${quickTotal}</span><span>${remaining} left</span></div>
       <div class="progressbar"><div style="width:${Math.round((doneCount/quickTotal)*100)}%"></div></div>
       <div class="card">
-        <div class="chaptertag">${v.chapterName}</div>
+        <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
         <div class="kanji">${v.k}</div>
         <div class="choice-list" id="choiceList">
           ${choices.map((c, i) => `<button class="choice-btn" data-i="${i}">${c.text}</button>`).join("")}
@@ -1849,7 +2016,7 @@ function renderQuick(){
       <div class="session-progress"><span>${doneCount} / ${quickTotal}</span><span>${remaining} left</span></div>
       <div class="progressbar"><div style="width:${Math.round((doneCount/quickTotal)*100)}%"></div></div>
       <div class="card tapzone" id="tapzone">
-        <div class="chaptertag">${v.chapterName}</div>
+        <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
         <div class="kanji">${v.k}</div>
         <div class="reveal-hint" id="hint">tap to reveal reading &amp; meaning</div>
       </div>
@@ -1864,7 +2031,7 @@ function renderQuick(){
         <div class="reading">${v.r}</div>
         <div class="meaning">${v.m}</div>
         <div class="sentence">${v.s}</div>
-        ${atDayGate ? '<div style="margin-top:12px;font-size:11.5px;color:var(--muted);">(Day gate: this card can advance to mastered tomorrow — not today.)</div>' : ''}
+        ${atDayGate ? '<div style="margin-top:12px;font-size:11.5px;color:var(--muted);">(This card can reach Mastered tomorrow — not today. Come back tomorrow.)</div>' : ''}
       </div>`;
       document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
         <button class="g-wrong" id="markWrong">✗ Wrong</button>
@@ -1921,16 +2088,16 @@ function startBrowse(chapterId){
 function renderBrowse(){ if (browseView === "grid") renderBrowseGrid(); else renderBrowseCard(); }
 function renderBrowseGrid(){
   const app = document.getElementById("app");
-  const chName = chapterById(activeChapterId).name;
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
   const idsToShow = browseShowFlaggedOnly ? browseList.filter(id=>browseFlagged.has(id)) : browseList;
   const tiles = idsToShow.map(id=>{
     const v = findVocab(id);
     const p = progress[id] || { box: 0 };
     const box = p.box;
     const flaggedCls = browseFlagged.has(id) ? " flagged" : "";
-    const boxBadge = box >= MAX_BOX ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--green);font-weight:700;">box 3</div>` :
-                     box >= 2 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--blue);font-weight:700;">box 2</div>` :
-                     box >= 1 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--amber);font-weight:700;">box 1</div>` : "";
+    const boxBadge = box >= MAX_BOX ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--green);font-weight:700;">L3</div>` :
+                     box >= 2 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--blue);font-weight:700;">L2</div>` :
+                     box >= 1 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--amber);font-weight:700;">L1</div>` : "";
     return `<div class="grid-tile${flaggedCls}" data-id="${id}">
       ${browseFlagged.has(id) ? '<span class="tile-star">★</span>' : ''}
       ${boxBadge}
@@ -1969,7 +2136,7 @@ function renderBrowseCard(){
       <button class="nav-arrow" id="prevBtn" ${browseIdx===0?"disabled":""}>‹</button>
       <div class="card" id="tapzone">
         <button class="star-toggle ${isFlagged?"on":""}" id="starBtn" title="Flag for redo">★</button>
-        <div class="chaptertag">${v.chapterName} · box ${p.box}</div>
+        <div class="chaptertag">${cleanChapterName(v.chapterName)} · level ${p.box}</div>
         <div class="kanji">${v.k}</div>
         <div class="reading">${v.r}</div>
         <div class="meaning">${v.m}</div>
@@ -2024,7 +2191,7 @@ function renderLearn(){
 }
 function renderLearnStudy(){
   const app = document.getElementById("app");
-  const chName = chapterById(activeChapterId).name;
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
   const batch = learnBatches[learnBatchIdx];
   const items = batch.map(id=>{
     const v = findVocab(id);
@@ -2049,7 +2216,7 @@ function renderLearnStudy(){
 }
 function renderLearnTest(){
   const app = document.getElementById("app");
-  const chName = chapterById(activeChapterId).name;
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
   if (!learnTestQueue.length) {
     learnMastered.push(...learnBatches[learnBatchIdx]);
     if (learnBatchIdx < learnBatches.length - 1) learnPhase = "batchdone";
@@ -2064,7 +2231,7 @@ function renderLearnTest(){
     <div class="session-progress"><span>Batch ${learnBatchIdx+1} of ${learnBatches.length}</span><span>${doneCount} / ${learnTestTotal} got it</span></div>
     <div class="progressbar"><div style="width:${Math.round((doneCount/learnTestTotal)*100)}%"></div></div>
     <div class="card tapzone" id="tapzone">
-      <div class="chaptertag">${v.chapterName}</div>
+      <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
       <div class="kanji">${v.k}</div>
       <div class="reveal-hint" id="hint">tap to reveal reading &amp; meaning</div>
     </div>
@@ -2110,7 +2277,7 @@ function renderLearnBatchDone(){
 }
 function renderLearnChapterDone(){
   const app = document.getElementById("app");
-  const chName = chapterById(activeChapterId).name;
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
   app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Learn</span></div>
     <div class="card"><div class="empty"><div class="big">🎉</div>
     <div style="font-size:16px;font-weight:700;">All of ${chName} learned!</div>
@@ -2139,7 +2306,7 @@ function renderWeak(){
     app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Weak Words</span></div>
       <div class="card"><div class="empty"><div class="big">${stillWeak ? "🙂" : "✨"}</div>
       <div style="font-size:16px;font-weight:700;">${stillWeak ? "Round complete" : "No weak words right now"}</div>
-      <p>${stillWeak ? stillWeak + " word" + (stillWeak>1?"s":"") + " still need more practice — another round?" : "Miss a word and it shows up here."}</p></div></div>
+      <p>${stillWeak ? stillWeak + " word" + (stillWeak>1?"s":"") + " still need more practice — another round?" : "Miss a word in any session and it shows up here."}</p></div></div>
       ${stillWeak ? '<button class="small-btn" id="againBtn">Practice again</button>' : ""}`;
     document.getElementById("backBtn").addEventListener("click", backHome);
     const again = document.getElementById("againBtn");
@@ -2154,7 +2321,7 @@ function renderWeak(){
     <div class="session-progress"><span>${weakTotal - remaining + 1} / ${weakTotal} this round</span><span>missed ${misses}× before</span></div>
     <div class="progressbar"><div style="width:${Math.round(((weakTotal-remaining)/weakTotal)*100)}%"></div></div>
     <div class="card tapzone" id="tapzone">
-      <div class="chaptertag">${v.chapterName}</div>
+      <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
       <div class="kanji">${v.k}</div>
       <div class="reveal-hint" id="hint">tap to reveal reading &amp; meaning</div>
     </div>
@@ -2210,8 +2377,8 @@ function renderStatsScreen(){
     const st = chapterStatus(ch.id);
     const m = chapterMastery(ch.id);
     return `<div class="stat-row">
-      <span class="stat-row-name">${ch.name}</span>
-      <span class="stat-row-val">${st.label} · ${m.box3}/${m.total} at box 3</span>
+      <span class="stat-row-name">${cleanChapterName(ch.name)}</span>
+      <span class="stat-row-val">${st.label} · ${m.box3}/${m.total} at L3</span>
     </div>`;
   }).join("");
   app.innerHTML = `
@@ -2244,7 +2411,7 @@ function renderManage(){
   const app = document.getElementById("app");
   let rows = chapters.map(ch=>{
     return `<div class="manage-row">
-      <span class="rname">${ch.name} <span style="color:var(--muted);font-weight:400;">(${ch.cards.length})</span></span>
+      <span class="rname">${cleanChapterName(ch.name)} <span style="color:var(--muted);font-weight:400;">(${ch.cards.length})</span></span>
       <div class="manage-actions">
         ${ch.serverId ? `
           <button class="link-btn2" data-rename="${ch.id}">rename</button>
