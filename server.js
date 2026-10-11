@@ -409,7 +409,7 @@ app.delete("/api/chapters/:id", auth, adminOnly, async (req, res) => {
 /* ---------- progress ---------- */
 app.get("/api/progress", auth, async (req, res) => {
   const [rows] = await pool.query(
-    "SELECT card_id, box, due, misses, last_seen FROM progress WHERE user_id = ?",
+    "SELECT card_id, box, due, misses, last_seen, level2_at FROM progress WHERE user_id = ?",
     [req.user.id]
   );
   res.json({ progress: rows });
@@ -426,14 +426,16 @@ app.post("/api/progress", auth, async (req, res) => {
     it.due ? new Date(it.due) : null,
     Math.max(0, Number(it.misses) || 0),
     it.last_seen ? new Date(it.last_seen) : new Date(),
+    it.level2_at ? new Date(it.level2_at) : null,
   ]);
   await pool.query(
-    `INSERT INTO progress (user_id, card_id, box, due, misses, last_seen)
+    `INSERT INTO progress (user_id, card_id, box, due, misses, last_seen, level2_at)
      VALUES ?
      ON DUPLICATE KEY UPDATE
        box = IF(VALUES(last_seen) >= last_seen, VALUES(box), box),
        due = IF(VALUES(last_seen) >= last_seen, VALUES(due), due),
        misses = IF(VALUES(last_seen) >= last_seen, VALUES(misses), misses),
+       level2_at = IF(VALUES(last_seen) >= last_seen, VALUES(level2_at), level2_at),
        last_seen = GREATEST(last_seen, VALUES(last_seen))`,
     [values]
   );

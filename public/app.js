@@ -635,20 +635,7 @@ function nextUnmasteredAfter(chapterId){
   for (let i = 0; i < idx; i++) { if (!isMastered(chapters[i].id)) return chapters[i].id; }
   return chapterId;
 }
-function cardCanAdvanceToday(cardId) {
-  const p = progress[cardId];
-  if (!p) return false;
-  const b = clampBox(p.box);
-  if (b >= MAX_BOX) return false;
-  if (b <= 1) return true;
-  return !isSameDay(p.last_seen, new Date().toISOString());
-}
-function chapterHasWorkToday(chapterId) {
-  const cards = chapterCards(chapterId);
-  const started = cards.some(v => (progress[v.id]?.box || 0) > 0);
-  if (!started) return false;
-  return cards.some(v => cardCanAdvanceToday(v.id));
-}
+
 function detectDemotions(){
   let demoted = [];
   chapters.forEach(ch => {
@@ -664,6 +651,24 @@ function weakPoolIds(){
   return Object.keys(weakStats)
     .filter(id => weakStats[id] && weakStats[id].misses > 0 && findVocab(id))
     .sort((a,b) => weakStats[b].misses - weakStats[a].misses);
+}
+function globalReviewPoolIds(){
+  const ids = new Set(weakPoolIds());
+  VOCAB.forEach(v => {
+    const p = progress[v.id];
+    if (!p) return;
+    const b = clampBox(p.box);
+    if (b >= 1 && b < MAX_BOX) ids.add(v.id);
+  });
+  return [...ids].sort((a, b) => {
+    const ma = (weakStats[a]?.misses || 0), mb = (weakStats[b]?.misses || 0);
+    if (ma !== mb) return mb - ma;
+    const ba = clampBox(progress[a]?.box ?? 0), bb = clampBox(progress[b]?.box ?? 0);
+    if (ba !== bb) return ba - bb;
+    const sa = progress[a]?.last_seen ? new Date(progress[a].last_seen).getTime() : 0;
+    const sb = progress[b]?.last_seen ? new Date(progress[b].last_seen).getTime() : 0;
+    return sa - sb;
+  });
 }
 async function recordMiss(id){
   weakStats[id] = weakStats[id] || { misses: 0 };
@@ -1014,11 +1019,8 @@ function applyAnswer(cardId, correct){
   const p = progress[cardId] || { box:0, due:null, misses:0, last_seen:null, dirty:0, priority:0 };
   const now = new Date().toISOString();
   const prevBox = clampBox(p.box);
-  const prevSeen = p.last_seen;
   if (correct) {
-    if (prevBox >= MAX_BOX) p.box = MAX_BOX;
-    else if (prevBox === MAX_BOX - 1 && isSameDay(prevSeen, now)) p.box = prevBox;
-    else p.box = Math.min(MAX_BOX, prevBox + 1);
+    p.box = Math.min(MAX_BOX, prevBox + 1);
     p.priority = 0;
   } else {
     p.box = prevBox === 0 ? 0 : 1;
@@ -1747,35 +1749,7 @@ function renderDailyGoal(){
   </div>`;
 }
 
-function renderCheckinBanner(){
-  if (settings.studyMode !== "guided") return "";
-  const skipDate = getSprintSkipDate();
-  if (skipDate === todayKey()) return "";
-  const pending = [];
-  chapters.forEach(ch => {
-    if (isMastered(ch.id)) return;
-    if (chapterHasWorkToday(ch.id)) pending.push(ch.id);
-  });
-  if (!pending.length) return "";
-  sortChapters();
-  const first = chapters.find(c => pending.includes(c.id));
-  if (!first) return "";
-  const count = pending.length;
-  const title = count === 1
-    ? `⚠️ ${cleanChapterName(first.name)} is due for a check-in`
-    : `⚠️ ${count} chapters waiting for check-in`;
-  const sub = count === 1
-    ? `Some cards can still advance today. Finish it before it rots.`
-    : `You're pushing ahead without locking in the basics. Start with ${cleanChapterName(first.name)}.`;
-  return `<div class="checkin-banner">
-    <div class="cb-title">${title}</div>
-    <div class="cb-sub">${sub}</div>
-    <div class="cb-actions">
-      <button class="cb-go" id="checkinGo" data-ch="${first.id}">Start with ${cleanChapterName(first.name)} →</button>
-    </div>
-    <div style="text-align:right;"><button class="cb-skip" id="checkinSkip">ignore for today</button></div>
-  </div>`;
-}
+
 
 function renderCurrentChapterCard(chapterId){
   const ch = chapterById(chapterId);
@@ -1795,12 +1769,11 @@ function renderCurrentChapterCard(chapterId){
       <span class="cc-status-badge ${st.cls}">${st.label}</span>
       <span style="font-size:11px;color:var(--muted);">${pctMastered}% mastered</span>
     </div>
-    <div class="cc-btnrow">
-      <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
-      <button data-mode="browse" data-ch="${ch.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
-      <button data-mode="learn" data-ch="${ch.id}">📘 Learn<span class="btn-sub">study in small batches</span></button>
-      <button data-mode="review-mastered" data-ch="${ch.id}">🎯 Review<span class="btn-sub">practice this chapter</span></button>
-    </div>
+<div class="cc-btnrow">
+  <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
+  <button data-mode="browse" data-ch="${ch.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
+  <button data-mode="learn" data-ch="${ch.id}">📘 Learn<span class="btn-sub">study in small batches</span></button>
+</div>
   </div>`;
 }
 
@@ -1910,7 +1883,7 @@ function renderHome(){
   let html = `<div id="presenceStrip"></div>`;
   html += renderFocusSlider();
   html += renderDailyGoal();
-  html += renderCheckinBanner();
+
 
   const visibleIds = settings.studyMode === "guided"
     ? chapters.filter(c => isUnlocked(c.id)).map(c => c.id)
@@ -1921,17 +1894,17 @@ function renderHome(){
   }
   html += renderCarousel(visibleIds);
 
-  const weakCount = weakPoolIds().length;
-  html += `<div class="all-card">
-      <div class="ac-row">
-        <div>
-          <div class="cname">⚠️ Weak words</div>
-          <div class="mini-stat">${weakCount ? weakCount + " word" + (weakCount>1?"s":"") + " need extra practice" : "none right now — nice"}</div>
-        </div>
-        <button id="weakReviewBtn">Practice</button>
+const reviewCount = globalReviewPoolIds().length;
+html += `<div class="all-card">
+    <div class="ac-row">
+      <div>
+        <div class="cname">🔁 Review</div>
+        <div class="mini-stat">${reviewCount ? reviewCount + " card" + (reviewCount>1?"s":"") + " need practice" : "nothing to review — nice"}</div>
       </div>
-      <div class="ac-hint">Words you've gotten wrong before. Practice these extra to lock them in.</div>
-    </div>`;
+      <button id="reviewBtn">Practice</button>
+    </div>
+    <div class="ac-hint">Cards you've missed, plus anything you've studied that hasn't reached L3 yet.</div>
+  </div>`;
 
   const masteredChapters = chapters.filter(ch => isMastered(ch.id));
   if (masteredChapters.length > 0) {
@@ -1976,25 +1949,21 @@ function renderHome(){
   wireFocusSlider();
   wireCarousel(visibleIds);
 
-  const goBtn = document.getElementById("checkinGo");
-  if (goBtn) goBtn.addEventListener("click", ()=>{ currentChapterId = goBtn.dataset.ch; saveCurrentChapter(); renderHome(); });
-  const skipBtn = document.getElementById("checkinSkip");
-  if (skipBtn) skipBtn.addEventListener("click", ()=>{ setSprintSkipDate(todayKey()); toast("Check-in ignored for today"); renderHome(); });
 
-  const weakBtn = document.getElementById("weakReviewBtn");
-  if (weakBtn) weakBtn.addEventListener("click", startWeakReview);
+
+const reviewBtn = document.getElementById("reviewBtn");
+if (reviewBtn) reviewBtn.addEventListener("click", startGlobalReview);
 
   const masteredBtn = document.getElementById("masteredBtn");
   if (masteredBtn) masteredBtn.addEventListener("click", renderCollection);
 
-  document.querySelectorAll("[data-mode]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const ch = btn.dataset.ch, mode = btn.dataset.mode;
-      if (mode==="browse") startBrowse(ch);
-      else if (mode==="learn") startLearn(ch);
-      else if (mode==="review-mastered") startReviewMastered(ch);
-    });
+document.querySelectorAll("[data-mode]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    const ch = btn.dataset.ch, mode = btn.dataset.mode;
+    if (mode==="browse") startBrowse(ch);
+    else if (mode==="learn") startLearn(ch);
   });
+});
   document.querySelectorAll(".quick-btn").forEach(btn=>{
     btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
   });
@@ -2228,15 +2197,14 @@ function renderQuick(){
       <div id="gradeArea"></div>
     `;
     document.getElementById("backBtn").addEventListener("click", ()=> { syncNow(); renderHome(); });
-    document.getElementById("tapzone").addEventListener("click", ()=>{
-      markCardSeen(v.id);
-      const p = progress[v.id];
-      const atDayGate = p && p.box === MAX_BOX - 1 && isSameDay(p.last_seen, new Date().toISOString());
-      document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
-        <div class="reading">${v.r}</div>
-        <div class="meaning">${v.m}</div>
-        <div class="sentence">${v.s}</div>
-        ${atDayGate ? '<div style="margin-top:12px;font-size:11.5px;color:var(--muted);">(This card can reach Mastered tomorrow — not today. Come back tomorrow.)</div>' : ''}
+document.getElementById("tapzone").addEventListener("click", ()=>{
+  markCardSeen(v.id);
+  document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
+    <div class="reading">${v.r}</div>
+    <div class="meaning">${v.m}</div>
+    <div class="sentence">${v.s}</div>
+  </div>`;
+  ...
       </div>`;
       document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
         <button class="g-wrong" id="markWrong">✗ Wrong</button>
@@ -2494,39 +2462,43 @@ function renderLearnChapterDone(){
   document.getElementById("restartLearn").addEventListener("click", ()=> startLearn(activeChapterId));
 }
 
-/* ================= WEAK ================= */
-let weakQueue = [], weakTotal = 0;
+/* ================= GLOBAL REVIEW ================= */
+let reviewQueue = [], reviewTotal = 0;
 
-function startWeakReview(){
-  screen = "weak"; activeChapterId = null;
+function startGlobalReview(){
+  screen = "review"; activeChapterId = null;
   showTopbar(true);
-  const pool = weakPoolIds();
-  if (!pool.length) { renderWeak(); return; }
-  weakQueue = orderCards(pool);
-  weakTotal = weakQueue.length;
-  renderWeak();
+  const pool = globalReviewPoolIds();
+  if (!pool.length) { renderGlobalReview(); return; }
+  reviewQueue = orderCards(pool);
+  reviewTotal = reviewQueue.length;
+  renderGlobalReview();
 }
-function renderWeak(){
+function renderGlobalReview(){
   const app = document.getElementById("app");
-  if (!weakQueue.length) {
-    const stillWeak = weakPoolIds().length;
-    app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Weak Words</span></div>
-      <div class="card"><div class="empty"><div class="big">${stillWeak ? "🙂" : "✨"}</div>
-      <div style="font-size:16px;font-weight:700;">${stillWeak ? "Round complete" : "No weak words right now"}</div>
-      <p>${stillWeak ? stillWeak + " word" + (stillWeak>1?"s":"") + " still need more practice — another round?" : "Miss a word in any session and it shows up here."}</p></div></div>
-      ${stillWeak ? '<button class="small-btn" id="againBtn">Practice again</button>' : ""}`;
+  if (!reviewQueue.length) {
+    const still = globalReviewPoolIds().length;
+    app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Review</span></div>
+      <div class="card"><div class="empty"><div class="big">${still ? "🙂" : "✨"}</div>
+      <div style="font-size:16px;font-weight:700;">${still ? "Round complete" : "Nothing to review right now"}</div>
+      <p>${still ? still + " card" + (still>1?"s":"") + " still need more practice — another round?" : "Cards show up here when you miss them, or when they're still below L3."}</p></div></div>
+      ${still ? '<button class="small-btn" id="againBtn">Practice again</button>' : ""}`;
     document.getElementById("backBtn").addEventListener("click", backHome);
     const again = document.getElementById("againBtn");
-    if (again) again.addEventListener("click", startWeakReview);
+    if (again) again.addEventListener("click", startGlobalReview);
     return;
   }
-  const remaining = new Set(weakQueue).size;
-  const v = findVocab(weakQueue[0]);
+  const remaining = new Set(reviewQueue).size;
+  const v = findVocab(reviewQueue[0]);
   const misses = (weakStats[v.id] && weakStats[v.id].misses) || 0;
+  const box = clampBox(progress[v.id]?.box ?? 0);
+  const metaParts = [];
+  if (misses > 0) metaParts.push(`missed ${misses}×`);
+  metaParts.push(`L${box}`);
   app.innerHTML = `
-    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Weak Words</span></div>
-    <div class="session-progress"><span>${weakTotal - remaining + 1} / ${weakTotal} this round</span><span>missed ${misses}× before</span></div>
-    <div class="progressbar"><div style="width:${Math.round(((weakTotal-remaining)/weakTotal)*100)}%"></div></div>
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Review</span></div>
+    <div class="session-progress"><span>${reviewTotal - remaining + 1} / ${reviewTotal} this round</span><span>${metaParts.join(" · ")}</span></div>
+    <div class="progressbar"><div style="width:${Math.round(((reviewTotal-remaining)/reviewTotal)*100)}%"></div></div>
     <div class="card tapzone" id="tapzone">
       <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
       <div class="kanji">${v.k}</div>
@@ -2541,14 +2513,15 @@ function renderWeak(){
       <button class="g-wrong" id="markWrong">✗ Wrong</button>
       <button class="g-right" id="markRight">✓ Correct</button>
     </div>`;
-    document.getElementById("markRight").addEventListener("click", ()=> weakAnswer(true));
-    document.getElementById("markWrong").addEventListener("click", ()=> weakAnswer(false));
+    document.getElementById("markRight").addEventListener("click", ()=> reviewAnswer(true));
+    document.getElementById("markWrong").addEventListener("click", ()=> reviewAnswer(false));
   });
 }
-async function weakAnswer(correct){
-  const id = weakQueue.shift();
+async function reviewAnswer(correct){
+  const id = reviewQueue.shift();
   markCardSeen(id);
   await recordStreakToday();
+  applyAnswer(id, correct);
   if (correct) {
     if (weakStats[id]) {
       weakStats[id].misses = Math.max(0, weakStats[id].misses - 1);
@@ -2558,12 +2531,13 @@ async function weakAnswer(correct){
   } else {
     await recordMiss(id);
     const gap = Math.max(1, settings.requeueGap);
-    const pos = Math.min(weakQueue.length, gap);
-    weakQueue.splice(pos, 0, id);
+    const pos = Math.min(reviewQueue.length, gap);
+    reviewQueue.splice(pos, 0, id);
   }
-  renderWeak();
+  await saveLocalProgress();
+  syncNow();
+  renderGlobalReview();
 }
-
 /* ================= STATS ================= */
 function renderStatsScreen(){
   screen = "stats";
