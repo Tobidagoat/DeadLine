@@ -1,4 +1,3 @@
-<script>
 /* ================= config ================= */
 const API_BASE = "";
 const APP_NAME = "Deadline: JLPT drill";
@@ -144,7 +143,6 @@ function setSprintSkipDate(dateStr){
   try { localStorage.setItem(SPRINT_SKIP_DATE_KEY, dateStr); } catch(e){}
 }
 
-/* per-user scoped flags for onboarding + mode chosen */
 function userScopedKey(baseKey){
   const id = (authUser && authUser.id) ? String(authUser.id) : "_anonymous";
   return baseKey + "-u" + id;
@@ -754,7 +752,7 @@ function buildMCChoices(correctCard){
   return shuffleArr(choices);
 }
 
-/* ================= MODE CHOOSER (new accounts) ================= */
+/* ================= MODE CHOOSER ================= */
 function renderModeChooser(){
   screen = "modechooser";
   showTopbar(false);
@@ -803,7 +801,7 @@ function proceedAfterModeChooser(){
   }
 }
 
-/* ================= ANIMATED ONBOARDING ================= */
+/* ================= ONBOARDING ================= */
 let onboardSlide = 0;
 let onboardAutoTimer = null;
 
@@ -1103,7 +1101,6 @@ async function afterLogin(){
   }
   setLastUserId(currentUserId);
 
-  // one-time migration: legacy global onboarding/mode flags → per-user scoped flags
   try {
     const scopedOnboard = userScopedKey(ONBOARDED_KEY);
     const scopedMode = userScopedKey(K_MODE_CHOSEN);
@@ -2500,4 +2497,3 @@ document.addEventListener("keydown", (e)=>{
     renderLogin();
   }
 })();
-</script>
