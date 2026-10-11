@@ -354,7 +354,8 @@ async function loadLocal(){
 
 function showTopbar(loggedIn){
   document.getElementById("menuBtn").style.display = loggedIn ? "" : "none";
-  document.getElementById("chatBtn").style.display = loggedIn ? "" : "none";
+  const chatBtn = document.getElementById("chatBtn");
+  if (chatBtn) chatBtn.style.display = loggedIn ? "" : "none";
   document.getElementById("streakBadge").style.display = loggedIn && computeCurrentStreak() > 0 ? "" : "none";
   document.getElementById("storageNote").style.display = loggedIn ? "flex" : "none";
   if (!loggedIn) document.getElementById("statusPill").style.display = "none";
@@ -928,10 +929,19 @@ async function fetchUnreadDmCount(){
       if (unreadDmCount > prev && prev >= 0 && dmThreadUserId === null) {
         playMessageSound();
       }
-            updateMenuButtonDot();
+      updateMenuButtonDot();
       updateChatButtonDot();
     }
   } catch(e) {}
+}
+function updateMenuButtonDot(){
+  const btn = document.getElementById("menuBtn");
+  if (!btn) return;
+  if (unreadDmCount > 0) {
+    btn.innerHTML = '☰<span class="menu-dot"></span>';
+  } else {
+    btn.textContent = "☰";
+  }
 }
 function updateChatButtonDot(){
   const btn = document.getElementById("chatBtn");
@@ -2827,7 +2837,7 @@ function renderSettings(){
           <button class="seg-btn ${soundOn ? "active" : ""}" id="soundOnBtn">On</button>
           <button class="seg-btn ${soundOff ? "active" : ""}" id="soundOffBtn">Off</button>
         </div>
-        <div class="hint">Small chime when you receive a reaction or a message from a study buddy.</div>
+        <div class="hint">Small chime when you receive a reaction or a message.</div>
       </div>
       <div class="setting-row">
         <label>Daily goal (cards per day)</label>
@@ -2896,6 +2906,7 @@ function renderSettings(){
     renderSettings();
   });
 }
+
 document.getElementById("menuBtn").addEventListener("click", renderMenu);
 document.getElementById("chatBtn").addEventListener("click", renderThreadsScreen);
 
