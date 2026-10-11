@@ -1879,13 +1879,13 @@ function renderHome(){
   html += renderFocusSlider();
   html += renderDailyGoal();
 
-  const visibleIds = settings.studyMode === "guided"
-    ? chapters.filter(c => isUnlocked(c.id)).map(c => c.id)
-    : chapters.map(c => c.id);
-  if (!visibleIds.includes(currentChapterId)) {
-    currentChapterId = visibleIds[0] || chapters[0].id;
-    saveCurrentChapter();
-  }
+const visibleIds = settings.studyMode === "guided"
+  ? chapters.filter(c => isUnlocked(c.id) && !isMastered(c.id)).map(c => c.id)
+  : chapters.filter(c => !isMastered(c.id)).map(c => c.id);
+if (!visibleIds.includes(currentChapterId)) {
+  currentChapterId = visibleIds[0] || firstUnmasteredChapterId() || chapters[0].id;
+  saveCurrentChapter();
+}
   html += renderCarousel(visibleIds);
 
   const reviewCount = globalReviewPoolIds().length;
@@ -1968,15 +1968,19 @@ function renderHome(){
       list.style.display = open ? "none" : "block";
       lt.textContent = `${open ? "▾" : "▴"} All chapters (${chapters.length})`;
     });
-    document.querySelectorAll("[data-goto]").forEach(row=>{
-      row.addEventListener("click", ()=>{
-        const id = row.dataset.goto;
-        if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
-        currentChapterId = id;
-        saveCurrentChapter();
-        renderHome();
-      });
-    });
+document.querySelectorAll("[data-goto]").forEach(row=>{
+  row.addEventListener("click", ()=>{
+    const id = row.dataset.goto;
+    if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
+    if (isMastered(id)) {
+      showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section on the home screen.", "Open Menu → 🏆 Mastered chapters to practice it.");
+      return;
+    }
+    currentChapterId = id;
+    saveCurrentChapter();
+    renderHome();
+  });
+});
   }
 
   renderPresenceStrip();
