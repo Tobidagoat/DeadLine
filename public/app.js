@@ -31,7 +31,6 @@ const K_CURRENT_CHAPTER = "kanji-current-chapter-v1";
 const K_SETTINGS_DIRTY = "kanji-settings-dirty-v1";
 const K_WEAK_DIRTY = "kanji-weak-dirty-v1";
 const K_MODE_CHOSEN = "kanji-mode-chosen-v1";
-const K_SOUND_ENABLED = "kanji-sound-enabled-v1";
 
 const DEFAULT_SETTINGS = {
   shuffle: true,
@@ -127,6 +126,10 @@ function updateCachedUser(user){
 }
 function clearAuth(){
   stopPresenceLoop();
+  stopDmPoll();
+  dmThreadUserId = null;
+  dmLastMessageCount = 0;
+  unreadDmCount = 0;
   authToken = null; authUser = null;
   try {
     localStorage.removeItem(K_TOKEN);
@@ -217,6 +220,11 @@ let weakDirty = false;
 let screen = "login";
 let activeChapterId = null;
 let isNewAccount = false;
+let unreadDmCount = 0;
+let dmThreadUserId = null;
+let dmThreadMessages = [];
+let dmThreadPollTimer = null;
+let dmLastMessageCount = 0;
 
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 function shuffleArr(arr){
@@ -715,6 +723,13 @@ function playReactionSound(emoji){
     }
   } catch(e) {}
 }
+function playMessageSound(){
+  if (!settings.soundEnabled) return;
+  try {
+    playTone(880, 0, 0.08, 0.06, "sine");
+    playTone(1180, 0.06, 0.12, 0.07, "sine");
+  } catch(e) {}
+}
 
 /* ================= presence ================= */
 let presenceUsers = [];
@@ -730,11 +745,6 @@ function presenceStatus(lastActiveAt){
   const diff = Date.now() - t;
   if (diff < 2 * 60 * 1000) return "online";
   if (diff < 10 * 60 * 1000) return "recent";
-  return "offline";
-}
-function presenceLabel(status){
-  if (status === "online") return "online";
-  if (status === "recent") return "recently";
   return "offline";
 }
 function describeActivity(u){
@@ -781,12 +791,10 @@ async function pushActivity(chapterId, activity){
         method: "POST",
         body: JSON.stringify({ chapter_id: serverChId, activity: currentActivityKind })
       });
-      // Immediately refresh own presence so the strip updates fast
       if (screen === "home") fetchPresence();
     } catch(e) {}
   }, 150);
 }
-
 
 function renderPresenceStrip(){
   const el = document.getElementById("presenceStrip");
@@ -827,7 +835,8 @@ function openUserCard(u){
     ? ""
     : `<div class="reaction-row">
         ${["🔥","👋","💪","😅","🤔"].map(e => `<button class="reaction-btn" data-emoji="${e}">${e}</button>`).join("")}
-      </div>`;
+      </div>
+      <button class="small-btn" id="ucMessage" style="margin-bottom:8px;">💬 Message</button>`;
   overlay.innerHTML = `<div class="user-card">
     <div class="user-card-head">
       <div class="user-card-avatar ${st}">${emoji}</div>
@@ -837,10 +846,6 @@ function openUserCard(u){
     <div class="user-card-status ${st}">
       <span class="sts-dot"></span>${activity}
     </div>
-    <div class="user-card-stats">
-      <div class="uc-stat"><b>${u.current_activity ? "•" : "—"}</b><span>status</span></div>
-      <div class="uc-stat"><b>${st}</b><span>presence</span></div>
-    </div>
     ${reactionBtns}
     <button class="user-card-close" id="ucClose">Close</button>
   </div>`;
@@ -848,6 +853,11 @@ function openUserCard(u){
   const close = ()=> overlay.remove();
   overlay.addEventListener("click", (e)=>{ if (e.target === overlay) close(); });
   document.getElementById("ucClose").addEventListener("click", close);
+  const msgBtn = document.getElementById("ucMessage");
+  if (msgBtn) msgBtn.addEventListener("click", ()=>{
+    close();
+    openDmThread(u.id);
+  });
   overlay.querySelectorAll(".reaction-btn").forEach(btn => {
     btn.addEventListener("click", async ()=>{
       const emoji = btn.dataset.emoji;
@@ -892,16 +902,197 @@ function startPresenceLoop(){
   clearInterval(presenceTimer);
   fetchPresence();
   checkUnseenReactions();
+  fetchUnreadDmCount();
   presenceTimer = setInterval(()=>{
     if (authToken) {
       fetchPresence();
       checkUnseenReactions();
+      fetchUnreadDmCount();
     }
   }, 5000);
 }
 function stopPresenceLoop(){
   clearInterval(presenceTimer);
   presenceTimer = null;
+}
+
+/* ================= direct messages ================= */
+async function fetchUnreadDmCount(){
+  if (!authToken) return;
+  try {
+    const r = await api("/api/dm/unread-count");
+    if (r.ok && r.body) {
+      const prev = unreadDmCount;
+      unreadDmCount = r.body.count || 0;
+      if (unreadDmCount > prev && prev >= 0 && dmThreadUserId === null) {
+        playMessageSound();
+      }
+      updateMenuButtonDot();
+    }
+  } catch(e) {}
+}
+function updateMenuButtonDot(){
+  const btn = document.getElementById("menuBtn");
+  if (!btn) return;
+  if (unreadDmCount > 0) {
+    btn.innerHTML = '☰<span class="menu-dot"></span>';
+  } else {
+    btn.textContent = "☰";
+  }
+}
+async function renderThreadsScreen(){
+  screen = "dm-threads";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  const r = await api("/api/dm/threads");
+  const threads = (r.ok && r.body && r.body.threads) ? r.body.threads : [];
+  let listHtml = "";
+  if (threads.length === 0) {
+    listHtml = `<div class="card"><div class="empty"><div class="big">💬</div>
+      <div style="font-size:15px;font-weight:700;">No messages yet</div>
+      <p>Tap a study buddy on the home screen, then hit "Message" to start a conversation.</p></div></div>`;
+  } else {
+    listHtml = `<div class="panel" style="padding:0;">` + threads.map(t => `
+      <div class="dm-thread-row" data-uid="${t.user_id}">
+        <div class="dm-thread-avatar">${t.avatar_emoji || DEFAULT_EMOJI}</div>
+        <div class="dm-thread-body">
+          <div class="dm-thread-name">
+            <span>${t.display_name}${t.unread > 0 ? `<span class="dm-unread-badge">${t.unread}</span>` : ""}</span>
+            <span class="dm-thread-time">${formatRelativeTime(t.last_at)}</span>
+          </div>
+          <div class="dm-thread-preview">${escapeHtml(t.last_message)}</div>
+        </div>
+      </div>
+    `).join("") + `</div>`;
+  }
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Messages</span></div>
+    ${listHtml}
+  `;
+  document.getElementById("backBtn").addEventListener("click", ()=>{ dmThreadUserId = null; renderHome(); });
+  app.querySelectorAll(".dm-thread-row").forEach(row => {
+    row.addEventListener("click", ()=> openDmThread(Number(row.dataset.uid)));
+  });
+}
+async function openDmThread(userId){
+  dmThreadUserId = userId;
+  screen = "dm-thread";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← messages</button><span class="screen-title">Loading…</span></div>
+    <div class="dm-screen">
+      <div class="dm-body" id="dmBody"><div class="dm-empty">Loading…</div></div>
+      <div class="dm-input-row">
+        <textarea id="dmInput" placeholder="Message…" rows="1"></textarea>
+        <button class="dm-send" id="dmSend" disabled>▶</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("backBtn").addEventListener("click", ()=>{
+    dmThreadUserId = null;
+    stopDmPoll();
+    renderThreadsScreen();
+  });
+  const input = document.getElementById("dmInput");
+  const send = document.getElementById("dmSend");
+  input.addEventListener("input", ()=>{
+    send.disabled = input.value.trim().length === 0;
+    input.style.height = "auto";
+    input.style.height = Math.min(120, input.scrollHeight) + "px";
+  });
+  input.addEventListener("keydown", (e)=>{
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!send.disabled) sendMessage();
+    }
+  });
+  send.addEventListener("click", sendMessage);
+  async function sendMessage(){
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    input.style.height = "40px";
+    send.disabled = true;
+    const r = await api("/api/dm/" + userId, { method: "POST", body: JSON.stringify({ body: text }) });
+    if (r.ok) {
+      await loadThread(userId, true);
+    } else {
+      toast(r.body && r.body.error ? r.body.error : "Failed to send");
+    }
+  }
+  await loadThread(userId, true);
+  startDmPoll(userId);
+}
+async function loadThread(userId, scrollToBottom){
+  const body = document.getElementById("dmBody");
+  if (!body) return;
+  const r = await api("/api/dm/" + userId);
+  if (!r.ok) {
+    body.innerHTML = `<div class="dm-empty">Couldn't load this conversation.</div>`;
+    return;
+  }
+  const other = r.body.other;
+  const messages = r.body.messages || [];
+  const headerTitle = document.querySelector(".screen-title");
+  if (headerTitle) headerTitle.textContent = other.display_name;
+  const backrow = document.querySelector(".backrow");
+  if (backrow && !document.getElementById("dmHeaderAvatar")) {
+    const av = document.createElement("span");
+    av.id = "dmHeaderAvatar";
+    av.style.cssText = "display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent-soft);font-size:15px;";
+    av.textContent = other.avatar_emoji || DEFAULT_EMOJI;
+    backrow.insertBefore(av, backrow.lastElementChild);
+  }
+  if (messages.length === 0) {
+    body.innerHTML = `<div class="dm-empty">Say hi to ${other.display_name}.</div>`;
+    dmLastMessageCount = 0;
+    return;
+  }
+  const hadMessages = dmLastMessageCount;
+  if (messages.length > hadMessages && hadMessages > 0) {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.from_user_id !== authUser.id) playMessageSound();
+  }
+  dmLastMessageCount = messages.length;
+  body.innerHTML = messages.map(m => {
+    const fromMe = m.from_user_id === authUser.id;
+    return `<div class="dm-msg ${fromMe ? "from-me" : "from-them"}">
+      ${escapeHtml(m.body)}
+      <div class="dm-msg-time">${formatRelativeTime(m.created_at)}</div>
+    </div>`;
+  }).join("");
+  if (scrollToBottom) {
+    body.scrollTop = body.scrollHeight;
+  }
+  fetchUnreadDmCount();
+}
+function startDmPoll(userId){
+  stopDmPoll();
+  dmThreadPollTimer = setInterval(()=>{
+    if (screen === "dm-thread" && dmThreadUserId === userId) {
+      loadThread(userId, false);
+    }
+  }, 5000);
+}
+function stopDmPoll(){
+  if (dmThreadPollTimer) { clearInterval(dmThreadPollTimer); dmThreadPollTimer = null; }
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  })[c]);
+}
+function formatRelativeTime(iso){
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "";
+  const diff = Date.now() - t;
+  if (diff < 60000) return "just now";
+  if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
+  if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
+  const d = new Date(t);
+  return (d.getMonth()+1) + "/" + d.getDate();
 }
 
 let toastTimer = null;
@@ -1376,6 +1567,9 @@ async function afterLogin(){
 }
 
 function decidePostLoginScreen(){
+  dmThreadUserId = null;
+  dmLastMessageCount = 0;
+  unreadDmCount = 0;
   if (isNewAccount && !hasChosenMode()) {
     isNewAccount = false;
     renderModeChooser();
@@ -1533,6 +1727,7 @@ function renderMenu(){
       <div class="menu-item" id="m-how" style="padding:14px 16px;">💡 How it works</div>
       <div class="menu-item" id="m-profile" style="padding:14px 16px;">👤 Profile</div>
       <div class="menu-item" id="m-changepw" style="padding:14px 16px;">🔑 Change password</div>
+      <div class="menu-item" id="m-messages" style="padding:14px 16px;">💬 Messages${unreadDmCount > 0 ? ' <span class="dm-unread-badge">' + unreadDmCount + '</span>' : ''}</div>
       <div class="menu-item" id="m-collection" style="padding:14px 16px;">🏆 Mastered chapters</div>
       ${authUser.is_admin ? `
       <div class="menu-item" id="m-import" style="padding:14px 16px;">📥 Import chapter</div>
@@ -1548,6 +1743,7 @@ function renderMenu(){
   document.getElementById("m-how").addEventListener("click", renderHowItWorks);
   document.getElementById("m-profile").addEventListener("click", ()=> renderProfile());
   document.getElementById("m-changepw").addEventListener("click", renderChangePassword);
+  document.getElementById("m-messages").addEventListener("click", renderThreadsScreen);
   document.getElementById("m-collection").addEventListener("click", renderCollection);
   const importBtn = document.getElementById("m-import");
   if (importBtn) importBtn.addEventListener("click", ()=> document.getElementById("importFile").click());
@@ -1936,7 +2132,8 @@ function renderHome(){
       });
     });
   }
-    renderPresenceStrip();
+
+  renderPresenceStrip();
 }
 function backHome(){ pushActivity(null, null); renderHome(); }
 
@@ -2602,6 +2799,8 @@ function renderSettings(){
   const free = settings.studyMode !== "guided";
   const interOn = settings.interleaving !== false;
   const interOff = settings.interleaving === false;
+  const soundOn = settings.soundEnabled !== false;
+  const soundOff = settings.soundEnabled === false;
   app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Settings</span></div>
     <div class="panel" style="margin-bottom:12px;">
       <div class="setting-row">
@@ -2620,19 +2819,19 @@ function renderSettings(){
         </div>
         <div class="hint">Adds ~20% cards from other unfinished chapters into Quick sessions.</div>
       </div>
-            <div class="setting-row">
+      <div class="setting-row">
+        <label>Reaction sounds</label>
+        <div class="seg-control">
+          <button class="seg-btn ${soundOn ? "active" : ""}" id="soundOnBtn">On</button>
+          <button class="seg-btn ${soundOff ? "active" : ""}" id="soundOffBtn">Off</button>
+        </div>
+        <div class="hint">Small chime when you receive a reaction or a message from a study buddy.</div>
+      </div>
+      <div class="setting-row">
         <label>Daily goal (cards per day)</label>
         <div class="unit-input">
           <input type="number" min="1" id="dailyGoal" value="${settings.dailyGoal || DEFAULT_DAILY_GOAL}">
         </div>
-      </div>
-      <div class="setting-row">
-        <label>Reaction sounds</label>
-        <div class="seg-control">
-          <button class="seg-btn ${settings.soundEnabled !== false ? "active" : ""}" id="soundOnBtn">On</button>
-          <button class="seg-btn ${settings.soundEnabled === false ? "active" : ""}" id="soundOffBtn">Off</button>
-        </div>
-        <div class="hint">Play a small chime when you receive a reaction from a study buddy.</div>
       </div>
     </div>
     <div class="panel">
@@ -2682,7 +2881,6 @@ function renderSettings(){
     settings.requeueGap = Math.max(1, Number(document.getElementById("requeueGap").value) || 3);
     settings.learnBatchSize = Math.max(3, Math.min(10, Number(document.getElementById("learnBatchSize").value) || 6));
     settings.dailyGoal = Math.max(1, Number(document.getElementById("dailyGoal").value) || DEFAULT_DAILY_GOAL);
-    // soundEnabled is set by the toggle buttons directly
     await saveSettings();
     toast("Settings saved");
     syncNow();

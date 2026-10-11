@@ -52,7 +52,6 @@ async function auth(req, res, next) {
     );
     if (rows.length === 0) return res.status(401).json({ error: "user not found" });
     req.user = rows[0];
-    // fire-and-forget activity update
     pool.query("UPDATE users SET last_active_at = NOW() WHERE id = ?", [req.user.id]).catch(()=>{});
     next();
   } catch (e) {
@@ -260,6 +259,106 @@ app.post("/api/reactions/seen", auth, async (req, res) => {
     [req.user.id, ...safeIds]
   );
   res.json({ ok: true });
+});
+
+/* ---------- direct messages ---------- */
+app.get("/api/dm/threads", auth, async (req, res) => {
+  const uid = req.user.id;
+  const [rows] = await pool.query(
+    `SELECT
+       t.other_id,
+       u.username, u.display_name, u.avatar_emoji,
+       t.last_message,
+       t.last_at,
+       (SELECT COUNT(*) FROM dm_messages
+         WHERE from_user_id = t.other_id AND to_user_id = ? AND read_at IS NULL) AS unread
+     FROM (
+       SELECT
+         IF(from_user_id = ?, to_user_id, from_user_id) AS other_id,
+         (SELECT body FROM dm_messages m2
+           WHERE (m2.from_user_id = ? AND m2.to_user_id = IF(from_user_id = ?, to_user_id, from_user_id))
+              OR (m2.to_user_id = ? AND m2.from_user_id = IF(from_user_id = ?, to_user_id, from_user_id))
+           ORDER BY m2.created_at DESC LIMIT 1) AS last_message,
+         MAX(created_at) AS last_at
+       FROM dm_messages
+       WHERE from_user_id = ? OR to_user_id = ?
+       GROUP BY other_id
+     ) AS t
+     JOIN users u ON u.id = t.other_id
+     ORDER BY t.last_at DESC`,
+    [uid, uid, uid, uid, uid, uid, uid, uid]
+  );
+  res.json({ threads: rows.map(r => ({
+    user_id: r.other_id,
+    username: r.username,
+    display_name: r.display_name || r.username,
+    avatar_emoji: r.avatar_emoji || null,
+    last_message: r.last_message || "",
+    last_at: r.last_at,
+    unread: Number(r.unread) || 0,
+  })) });
+});
+
+app.get("/api/dm/unread-count", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    "SELECT COUNT(*) AS n FROM dm_messages WHERE to_user_id = ? AND read_at IS NULL",
+    [req.user.id]
+  );
+  res.json({ count: Number(rows[0].n) || 0 });
+});
+
+app.get("/api/dm/:userId", auth, async (req, res) => {
+  const otherId = Number(req.params.userId);
+  if (!otherId) return res.status(400).json({ error: "invalid user id" });
+  const [users] = await pool.query(
+    "SELECT id, username, display_name, avatar_emoji FROM users WHERE id = ?",
+    [otherId]
+  );
+  if (users.length === 0) return res.status(404).json({ error: "user not found" });
+  const [msgs] = await pool.query(
+    `SELECT id, from_user_id, to_user_id, body, created_at, read_at
+     FROM dm_messages
+     WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)
+     ORDER BY created_at ASC
+     LIMIT 200`,
+    [req.user.id, otherId, otherId, req.user.id]
+  );
+  await pool.query(
+    "UPDATE dm_messages SET read_at = NOW() WHERE to_user_id = ? AND from_user_id = ? AND read_at IS NULL",
+    [req.user.id, otherId]
+  );
+  res.json({
+    other: {
+      id: users[0].id,
+      username: users[0].username,
+      display_name: users[0].display_name || users[0].username,
+      avatar_emoji: users[0].avatar_emoji || null,
+    },
+    messages: msgs.map(m => ({
+      id: m.id,
+      from_user_id: m.from_user_id,
+      to_user_id: m.to_user_id,
+      body: m.body,
+      created_at: m.created_at,
+      read_at: m.read_at,
+    })),
+  });
+});
+
+app.post("/api/dm/:userId", auth, async (req, res) => {
+  const otherId = Number(req.params.userId);
+  const body = String(req.body?.body || "").trim();
+  if (!otherId) return res.status(400).json({ error: "invalid user id" });
+  if (!body) return res.status(400).json({ error: "empty message" });
+  if (body.length > 2000) return res.status(400).json({ error: "message too long" });
+  if (otherId === req.user.id) return res.status(400).json({ error: "can't message yourself" });
+  const [users] = await pool.query("SELECT id FROM users WHERE id = ?", [otherId]);
+  if (users.length === 0) return res.status(404).json({ error: "user not found" });
+  const [r] = await pool.query(
+    "INSERT INTO dm_messages (from_user_id, to_user_id, body) VALUES (?, ?, ?)",
+    [req.user.id, otherId, body]
+  );
+  res.json({ ok: true, id: r.insertId });
 });
 
 /* ---------- settings sync ---------- */
