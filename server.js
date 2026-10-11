@@ -47,11 +47,13 @@ async function auth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const [rows] = await pool.query(
-      "SELECT id, username, is_admin FROM users WHERE id = ?",
+      "SELECT id, username, is_admin, display_name, avatar_emoji FROM users WHERE id = ?",
       [payload.id]
     );
     if (rows.length === 0) return res.status(401).json({ error: "user not found" });
     req.user = rows[0];
+    // fire-and-forget activity update
+    pool.query("UPDATE users SET last_active_at = NOW() WHERE id = ?", [req.user.id]).catch(()=>{});
     next();
   } catch (e) {
     res.status(401).json({ error: "invalid token" });
@@ -122,6 +124,7 @@ app.post("/api/auth/login", async (req, res) => {
   const ok = await bcrypt.compare(password, rows[0].password_hash);
   if (!ok) return res.status(401).json({ error: "invalid credentials" });
   const user = publicUser(rows[0]);
+  await pool.query("UPDATE users SET last_active_at = NOW() WHERE id = ?", [user.id]);
   res.json({ token: sign({ id: user.id, username: user.username }), user });
 });
 
@@ -129,7 +132,7 @@ app.post("/api/auth/change-password", auth, async (req, res) => {
   const { current_password, new_password } = req.body || {};
   if (!current_password || !new_password) return res.status(400).json({ error: "current_password and new_password required" });
   if (new_password.length < 6) return res.status(400).json({ error: "new password must be at least 6 characters" });
-  if (new_password === current_password) return res.status(400).json({ error: "new password must be different from current" });
+  if (new_password === current_password) return res.status(400).json({ error: "new password must be different" });
   const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
   if (rows.length === 0) return res.status(404).json({ error: "user not found" });
   const ok = await bcrypt.compare(current_password, rows[0].password_hash);
@@ -173,6 +176,90 @@ app.patch("/api/me", auth, async (req, res) => {
     [req.user.id]
   );
   res.json({ user: publicUser(rows[0]) });
+});
+
+/* ---------- presence ---------- */
+app.get("/api/presence", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_emoji,
+            u.last_active_at, u.current_chapter_id, u.current_activity,
+            c.name AS chapter_name
+     FROM users u
+     LEFT JOIN chapters c ON c.id = u.current_chapter_id
+     ORDER BY u.id ASC`
+  );
+  res.json({ users: rows.map(r => ({
+    id: r.id,
+    username: r.username,
+    display_name: r.display_name || r.username,
+    avatar_emoji: r.avatar_emoji || null,
+    last_active_at: r.last_active_at,
+    current_chapter_id: r.current_chapter_id,
+    current_chapter_name: r.chapter_name,
+    current_activity: r.current_activity,
+  })) });
+});
+
+app.post("/api/activity", auth, async (req, res) => {
+  const { chapter_id, activity } = req.body || {};
+  const validActivities = ["browse", "learn", "quick", "review", "idle", null];
+  const act = validActivities.includes(activity) ? activity : null;
+  const chId = chapter_id ? Number(chapter_id) : null;
+  await pool.query(
+    "UPDATE users SET current_chapter_id = ?, current_activity = ?, last_active_at = NOW() WHERE id = ?",
+    [chId, act, req.user.id]
+  );
+  res.json({ ok: true });
+});
+
+/* ---------- reactions ---------- */
+const VALID_EMOJI = ["🔥", "👋", "💪", "😅", "🤔"];
+app.post("/api/reactions", auth, async (req, res) => {
+  const { to_user_id, emoji } = req.body || {};
+  const toId = Number(to_user_id);
+  if (!toId || !emoji) return res.status(400).json({ error: "to_user_id and emoji required" });
+  if (!VALID_EMOJI.includes(emoji)) return res.status(400).json({ error: "invalid emoji" });
+  if (toId === req.user.id) return res.status(400).json({ error: "can't react to yourself" });
+  const [target] = await pool.query("SELECT id FROM users WHERE id = ?", [toId]);
+  if (target.length === 0) return res.status(404).json({ error: "user not found" });
+  await pool.query(
+    "INSERT INTO reactions (from_user_id, to_user_id, emoji) VALUES (?, ?, ?)",
+    [req.user.id, toId, emoji]
+  );
+  res.json({ ok: true });
+});
+
+app.get("/api/reactions/unseen", auth, async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT r.id, r.emoji, r.created_at,
+            u.id AS from_user_id, u.username AS from_username,
+            u.display_name AS from_display_name, u.avatar_emoji AS from_avatar_emoji
+     FROM reactions r
+     JOIN users u ON u.id = r.from_user_id
+     WHERE r.to_user_id = ? AND r.seen = 0
+     ORDER BY r.created_at ASC`,
+    [req.user.id]
+  );
+  res.json({ reactions: rows.map(r => ({
+    id: r.id,
+    emoji: r.emoji,
+    created_at: r.created_at,
+    from_user_id: r.from_user_id,
+    from_display_name: r.from_display_name || r.from_username,
+    from_avatar_emoji: r.from_avatar_emoji || null,
+  })) });
+});
+
+app.post("/api/reactions/seen", auth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (ids.length === 0) return res.json({ ok: true });
+  const safeIds = ids.map(n => Number(n)).filter(Boolean);
+  if (safeIds.length === 0) return res.json({ ok: true });
+  await pool.query(
+    `UPDATE reactions SET seen = 1 WHERE to_user_id = ? AND id IN (${safeIds.map(()=>"?").join(",")})`,
+    [req.user.id, ...safeIds]
+  );
+  res.json({ ok: true });
 });
 
 /* ---------- settings sync ---------- */

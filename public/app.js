@@ -31,6 +31,7 @@ const K_CURRENT_CHAPTER = "kanji-current-chapter-v1";
 const K_SETTINGS_DIRTY = "kanji-settings-dirty-v1";
 const K_WEAK_DIRTY = "kanji-weak-dirty-v1";
 const K_MODE_CHOSEN = "kanji-mode-chosen-v1";
+const K_SOUND_ENABLED = "kanji-sound-enabled-v1";
 
 const DEFAULT_SETTINGS = {
   shuffle: true,
@@ -39,7 +40,8 @@ const DEFAULT_SETTINGS = {
   learnCumulative: true,
   studyMode: "free",
   interleaving: true,
-  dailyGoal: DEFAULT_DAILY_GOAL
+  dailyGoal: DEFAULT_DAILY_GOAL,
+  soundEnabled: true
 };
 
 /* ================= IndexedDB ================= */
@@ -124,6 +126,7 @@ function updateCachedUser(user){
   try { localStorage.setItem(K_USER, JSON.stringify(user)); } catch(e) {}
 }
 function clearAuth(){
+  stopPresenceLoop();
   authToken = null; authUser = null;
   try {
     localStorage.removeItem(K_TOKEN);
@@ -661,6 +664,237 @@ async function recordMiss(id){
   await saveWeakStats();
 }
 
+/* ================= sounds ================= */
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+    } catch(e) { return null; }
+  }
+  return audioCtx;
+}
+function playTone(freq, startAt, duration, volume, type){
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(()=>{});
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freq, ctx.currentTime + startAt);
+  gain.gain.setValueAtTime(0, ctx.currentTime + startAt);
+  gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + startAt + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startAt + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(ctx.currentTime + startAt);
+  osc.stop(ctx.currentTime + startAt + duration + 0.05);
+}
+function playReactionSound(emoji){
+  if (!settings.soundEnabled) return;
+  try {
+    if (emoji === "🔥") {
+      playTone(660, 0, 0.12, 0.09, "triangle");
+      playTone(880, 0.08, 0.18, 0.09, "triangle");
+      playTone(1320, 0.16, 0.22, 0.08, "triangle");
+    } else if (emoji === "👋") {
+      playTone(880, 0, 0.14, 0.1, "sine");
+      playTone(660, 0.12, 0.18, 0.1, "sine");
+    } else if (emoji === "💪") {
+      playTone(220, 0, 0.18, 0.11, "sine");
+      playTone(330, 0.08, 0.22, 0.08, "sine");
+    } else if (emoji === "😅") {
+      playTone(1200, 0, 0.06, 0.07, "square");
+      playTone(1100, 0.08, 0.06, 0.07, "square");
+    } else if (emoji === "🤔") {
+      playTone(440, 0, 0.14, 0.09, "sine");
+      playTone(587, 0.14, 0.22, 0.09, "sine");
+    } else {
+      playTone(720, 0, 0.15, 0.08, "sine");
+    }
+  } catch(e) {}
+}
+
+/* ================= presence ================= */
+let presenceUsers = [];
+let presenceTimer = null;
+let currentActivityChapterId = null;
+let currentActivityKind = null;
+let activityThrottleTimer = null;
+
+function presenceStatus(lastActiveAt){
+  if (!lastActiveAt) return "offline";
+  const t = new Date(lastActiveAt).getTime();
+  if (isNaN(t)) return "offline";
+  const diff = Date.now() - t;
+  if (diff < 2 * 60 * 1000) return "online";
+  if (diff < 10 * 60 * 1000) return "recent";
+  return "offline";
+}
+function presenceLabel(status){
+  if (status === "online") return "online";
+  if (status === "recent") return "recently";
+  return "offline";
+}
+function describeActivity(u){
+  if (!u || !u.last_active_at) return "offline";
+  const st = presenceStatus(u.last_active_at);
+  if (st === "offline") return "offline";
+  if (u.current_activity && u.current_chapter_name) {
+    const verb = u.current_activity === "browse" ? "reading"
+      : u.current_activity === "learn" ? "learning"
+      : u.current_activity === "quick" ? "practicing"
+      : u.current_activity === "review" ? "reviewing"
+      : "studying";
+    return `${verb} ${cleanChapterName(u.current_chapter_name)}`;
+  }
+  if (u.current_activity) return u.current_activity;
+  return st === "online" ? "online" : "recently active";
+}
+
+async function fetchPresence(){
+  if (!authToken) return;
+  try {
+    const r = await api("/api/presence");
+    if (r.ok && r.body && r.body.users) {
+      presenceUsers = r.body.users;
+      if (screen === "home") renderPresenceStrip();
+    }
+  } catch(e) {}
+}
+
+async function pushActivity(chapterId, activity){
+  if (!authToken) return;
+  currentActivityChapterId = chapterId || null;
+  currentActivityKind = activity || null;
+  clearTimeout(activityThrottleTimer);
+  activityThrottleTimer = setTimeout(async ()=>{
+    try {
+      await api("/api/activity", {
+        method: "POST",
+        body: JSON.stringify({ chapter_id: currentActivityChapterId, activity: currentActivityKind })
+      });
+    } catch(e) {}
+  }, 150);
+}
+
+function renderPresenceStrip(){
+  const el = document.getElementById("presenceStrip");
+  if (!el) return;
+  const others = presenceUsers.filter(u => String(u.id) !== String(authUser.id));
+  const me = presenceUsers.find(u => String(u.id) === String(authUser.id));
+  const list = [...(me ? [me] : []), ...others];
+  if (list.length === 0) { el.innerHTML = ""; return; }
+  const bubbles = list.map(u => {
+    const st = presenceStatus(u.last_active_at);
+    const isMe = String(u.id) === String(authUser.id);
+    const emoji = u.avatar_emoji || DEFAULT_EMOJI;
+    const name = u.display_name || u.username;
+    return `<button class="presence-bubble ${st} ${isMe ? "you" : ""}" data-uid="${u.id}">
+      <span class="presence-avatar">${emoji}<span class="presence-dot"></span></span>
+      <span class="presence-name">${isMe ? "you" : name}</span>
+    </button>`;
+  }).join("");
+  el.innerHTML = `<div class="presence-label">Study buddies</div><div class="presence-strip">${bubbles}</div>`;
+  el.querySelectorAll(".presence-bubble").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const uid = btn.dataset.uid;
+      const u = presenceUsers.find(x => String(x.id) === String(uid));
+      if (u) openUserCard(u);
+    });
+  });
+}
+
+function openUserCard(u){
+  const st = presenceStatus(u.last_active_at);
+  const isMe = String(u.id) === String(authUser.id);
+  const emoji = u.avatar_emoji || DEFAULT_EMOJI;
+  const name = u.display_name || u.username;
+  const activity = describeActivity(u);
+  const overlay = document.createElement("div");
+  overlay.className = "user-card-overlay";
+  const reactionBtns = isMe
+    ? ""
+    : `<div class="reaction-row">
+        ${["🔥","👋","💪","😅","🤔"].map(e => `<button class="reaction-btn" data-emoji="${e}">${e}</button>`).join("")}
+      </div>`;
+  overlay.innerHTML = `<div class="user-card">
+    <div class="user-card-head">
+      <div class="user-card-avatar ${st}">${emoji}</div>
+      <div class="user-card-name">${name}</div>
+      <div class="user-card-username">@${u.username}</div>
+    </div>
+    <div class="user-card-status ${st}">
+      <span class="sts-dot"></span>${activity}
+    </div>
+    <div class="user-card-stats">
+      <div class="uc-stat"><b>${u.current_activity ? "•" : "—"}</b><span>status</span></div>
+      <div class="uc-stat"><b>${st}</b><span>presence</span></div>
+    </div>
+    ${reactionBtns}
+    <button class="user-card-close" id="ucClose">Close</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  overlay.addEventListener("click", (e)=>{ if (e.target === overlay) close(); });
+  document.getElementById("ucClose").addEventListener("click", close);
+  overlay.querySelectorAll(".reaction-btn").forEach(btn => {
+    btn.addEventListener("click", async ()=>{
+      const emoji = btn.dataset.emoji;
+      btn.disabled = true;
+      const r = await api("/api/reactions", {
+        method: "POST",
+        body: JSON.stringify({ to_user_id: u.id, emoji })
+      });
+      if (r.ok) {
+        toast(`Sent ${emoji} to ${name}`);
+        close();
+      } else {
+        btn.disabled = false;
+        toast(r.body && r.body.error ? r.body.error : "Failed to send");
+      }
+    });
+  });
+}
+
+async function checkUnseenReactions(){
+  if (!authToken) return;
+  try {
+    const r = await api("/api/reactions/unseen");
+    if (!r.ok || !r.body || !r.body.reactions) return;
+    const list = r.body.reactions;
+    if (list.length === 0) return;
+    const ids = [];
+    for (const rx of list) {
+      playReactionSound(rx.emoji);
+      const el = document.createElement("div");
+      el.className = "reaction-toast";
+      el.innerHTML = `<span class="rt-emoji">${rx.emoji}</span><span class="rt-text"><b>${rx.from_display_name}</b> sent you a reaction</span>`;
+      document.body.appendChild(el);
+      setTimeout(()=> el.remove(), 3500);
+      ids.push(rx.id);
+    }
+    await api("/api/reactions/seen", { method: "POST", body: JSON.stringify({ ids }) });
+  } catch(e) {}
+}
+
+function startPresenceLoop(){
+  clearInterval(presenceTimer);
+  fetchPresence();
+  checkUnseenReactions();
+  presenceTimer = setInterval(()=>{
+    if (authToken) {
+      fetchPresence();
+      checkUnseenReactions();
+    }
+  }, 30000);
+}
+function stopPresenceLoop(){
+  clearInterval(presenceTimer);
+  presenceTimer = null;
+}
+
 let toastTimer = null;
 function toast(msg){
   const t = document.getElementById("toast");
@@ -1129,6 +1363,7 @@ async function afterLogin(){
     }
   }, 120000);
   setInterval(()=> updateUserLine(), 30000);
+  startPresenceLoop();
 }
 
 function decidePostLoginScreen(){
@@ -1559,6 +1794,7 @@ function wireCarousel(chapterIds){
 function renderHome(){
   screen = "home"; activeChapterId = null;
   showTopbar(true);
+  pushActivity(null, null);
   const app = document.getElementById("app");
   updateStreakBadge();
   updateUserLine();
@@ -1581,7 +1817,8 @@ function renderHome(){
     saveCurrentChapter();
   }
 
-  let html = renderFocusSlider();
+  let html = `<div id="presenceStrip"></div>`;
+  html += renderFocusSlider();
   html += renderDailyGoal();
   html += renderCheckinBanner();
 
@@ -1690,8 +1927,9 @@ function renderHome(){
       });
     });
   }
+    renderPresenceStrip();
 }
-function backHome(){ renderHome(); }
+function backHome(){ pushActivity(null, null); renderHome(); }
 
 /* ================= COLLECTION ================= */
 function renderCollection(){
@@ -1736,6 +1974,7 @@ function renderCollection(){
 /* ================= REVIEW MASTERED ================= */
 function startReviewMastered(chapterId){
   screen = "review-mastered";
+  if (chapterId) pushActivity(chapterId, "review");
   const pool = [];
   if (chapterId) {
     const ch = chapterById(chapterId);
@@ -1798,6 +2037,7 @@ function startQuick(chapterId, inputMode){
   quickInputMode = inputMode || "flash";
   quickChapterId = chapterId;
   quickIsReview = false;
+  pushActivity(chapterId, "quick");
   const queue = buildQuickQueue(chapterId);
   launchQuickWithQueue(queue, cleanChapterName(chapterById(chapterId).name), false);
 }
@@ -1954,6 +2194,7 @@ let browseList = [], browseIdx = 0, browseFlagged = new Set(), browseView = "gri
 function startBrowse(chapterId){
   screen = "browse"; activeChapterId = chapterId;
   showTopbar(true);
+  pushActivity(chapterId, "browse");
   browseList = orderCards(chapterCards(chapterId).map(v=>v.id));
   browseFlagged = new Set();
   browseView = "grid"; browseShowFlaggedOnly = false;
@@ -2040,6 +2281,7 @@ function chunkArr(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) ou
 function startLearn(chapterId){
   screen = "learn"; activeChapterId = chapterId;
   showTopbar(true);
+  pushActivity(chapterId, "learn");
   const ids = orderCards(chapterCards(chapterId).map(v=>v.id));
   const size = Math.max(3, Math.min(10, settings.learnBatchSize || 6));
   learnBatches = chunkArr(ids, size);
@@ -2369,11 +2611,19 @@ function renderSettings(){
         </div>
         <div class="hint">Adds ~20% cards from other unfinished chapters into Quick sessions.</div>
       </div>
-      <div class="setting-row">
+            <div class="setting-row">
         <label>Daily goal (cards per day)</label>
         <div class="unit-input">
           <input type="number" min="1" id="dailyGoal" value="${settings.dailyGoal || DEFAULT_DAILY_GOAL}">
         </div>
+      </div>
+      <div class="setting-row">
+        <label>Reaction sounds</label>
+        <div class="seg-control">
+          <button class="seg-btn ${settings.soundEnabled !== false ? "active" : ""}" id="soundOnBtn">On</button>
+          <button class="seg-btn ${settings.soundEnabled === false ? "active" : ""}" id="soundOffBtn">Off</button>
+        </div>
+        <div class="hint">Play a small chime when you receive a reaction from a study buddy.</div>
       </div>
     </div>
     <div class="panel">
@@ -2413,6 +2663,8 @@ function renderSettings(){
   document.getElementById("modeFree").addEventListener("click", ()=>{ settings.studyMode = "free"; renderSettings(); });
   document.getElementById("interOn").addEventListener("click", ()=>{ settings.interleaving = true; renderSettings(); });
   document.getElementById("interOff").addEventListener("click", ()=>{ settings.interleaving = false; renderSettings(); });
+  document.getElementById("soundOnBtn").addEventListener("click", ()=>{ settings.soundEnabled = true; renderSettings(); });
+  document.getElementById("soundOffBtn").addEventListener("click", ()=>{ settings.soundEnabled = false; renderSettings(); });
   document.getElementById("shuffleOnBtn").addEventListener("click", ()=>{ settings.shuffle = true; renderSettings(); });
   document.getElementById("shuffleOffBtn").addEventListener("click", ()=>{ settings.shuffle = false; renderSettings(); });
   document.getElementById("cumOnBtn").addEventListener("click", ()=>{ settings.learnCumulative = true; renderSettings(); });
@@ -2421,6 +2673,7 @@ function renderSettings(){
     settings.requeueGap = Math.max(1, Number(document.getElementById("requeueGap").value) || 3);
     settings.learnBatchSize = Math.max(3, Math.min(10, Number(document.getElementById("learnBatchSize").value) || 6));
     settings.dailyGoal = Math.max(1, Number(document.getElementById("dailyGoal").value) || DEFAULT_DAILY_GOAL);
+    // soundEnabled is set by the toggle buttons directly
     await saveSettings();
     toast("Settings saved");
     syncNow();
