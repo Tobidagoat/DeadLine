@@ -764,6 +764,11 @@ async function fetchPresence(){
   } catch(e) {}
 }
 
+function serverChapterIdFromLocal(clientId){
+  if (!clientId) return null;
+  const ch = chapterById(clientId);
+  return ch && ch.serverId ? ch.serverId : null;
+}
 async function pushActivity(chapterId, activity){
   if (!authToken) return;
   currentActivityChapterId = chapterId || null;
@@ -771,13 +776,17 @@ async function pushActivity(chapterId, activity){
   clearTimeout(activityThrottleTimer);
   activityThrottleTimer = setTimeout(async ()=>{
     try {
+      const serverChId = serverChapterIdFromLocal(currentActivityChapterId);
       await api("/api/activity", {
         method: "POST",
-        body: JSON.stringify({ chapter_id: currentActivityChapterId, activity: currentActivityKind })
+        body: JSON.stringify({ chapter_id: serverChId, activity: currentActivityKind })
       });
+      // Immediately refresh own presence so the strip updates fast
+      if (screen === "home") fetchPresence();
     } catch(e) {}
   }, 150);
 }
+
 
 function renderPresenceStrip(){
   const el = document.getElementById("presenceStrip");
@@ -888,7 +897,7 @@ function startPresenceLoop(){
       fetchPresence();
       checkUnseenReactions();
     }
-  }, 30000);
+  }, 5000);
 }
 function stopPresenceLoop(){
   clearInterval(presenceTimer);
