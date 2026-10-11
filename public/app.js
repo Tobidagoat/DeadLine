@@ -635,7 +635,6 @@ function nextUnmasteredAfter(chapterId){
   for (let i = 0; i < idx; i++) { if (!isMastered(chapters[i].id)) return chapters[i].id; }
   return chapterId;
 }
-
 function detectDemotions(){
   let demoted = [];
   chapters.forEach(ch => {
@@ -937,7 +936,6 @@ async function renderNotificationsScreen(){
   screen = "notifications";
   showTopbar(true);
   const app = document.getElementById("app");
-  // mark all as read visually
   unreadNotifCount = 0;
   updateNotifBadge();
   let listHtml = "";
@@ -1143,7 +1141,7 @@ const ONBOARD_SLIDES = [
     icon: "⚡",
     title: "Quick Sessions are the core",
     body: `<p>Get a card <b>right</b> → it climbs a level. Get it <b>wrong</b> → it drops back and reappears later.</p>
-    <p>Cards need 3 correct recalls on different days to be Mastered.</p>`
+    <p>Cards need 3 correct recalls to be Mastered.</p>`
   },
   {
     icon: "🎯",
@@ -1298,7 +1296,7 @@ function renderHowItWorks(){
       <ul>
         <li>Get a card <b>right</b> → level +1 (max 3).</li>
         <li>Get a card <b>wrong</b> → drops back to level 1 (or stays at 0 if new).</li>
-        <li>To hit level 3, a card must have been seen on a <b>different day</b> at level 2. That means mastery takes at least <b>3 days</b>.</li>
+        <li>Three correct recalls take a card to level 3 (Mastered).</li>
       </ul>
 
       <h2>Chapter statuses</h2>
@@ -1313,9 +1311,8 @@ function renderHowItWorks(){
       <ul>
         <li><b>Exam countdown</b> — how many days until the test.</li>
         <li><b>Daily goal</b> — study this many cards today to keep your streak.</li>
-        <li><b>Check-in banner</b> — appears when an earlier chapter still has cards you can advance today.</li>
         <li><b>Current chapter</b> — the one you're working on. Swipe to see unlocked chapters.</li>
-        <li><b>Weak words</b> — cards you've gotten wrong. Practice these extra.</li>
+        <li><b>Review</b> — a global queue of cards you've missed, plus anything studied that hasn't reached L3 yet.</li>
         <li><b>Mastered</b> — chapters you've locked in. They stay there, safe.</li>
       </ul>
 
@@ -1670,7 +1667,7 @@ function buildFocusSlides(){
   slides.push(`<div class="focus-label">📖 Progress</div>
     <div class="focus-name">${mastered} / ${total} chapters mastered</div>
     <div class="focus-sub">${Math.round(100*mastered/total)}% of your syllabus</div>
-    <div class="focus-hint">A chapter is mastered when 90% of its cards have been recalled correctly on 3 different days.</div>`);
+    <div class="focus-hint">A chapter is mastered when 90% of its cards have reached level 3.</div>`);
   return slides;
 }
 function renderFocusSlider(){
@@ -1749,8 +1746,6 @@ function renderDailyGoal(){
   </div>`;
 }
 
-
-
 function renderCurrentChapterCard(chapterId){
   const ch = chapterById(chapterId);
   if (!ch) return "";
@@ -1769,11 +1764,11 @@ function renderCurrentChapterCard(chapterId){
       <span class="cc-status-badge ${st.cls}">${st.label}</span>
       <span style="font-size:11px;color:var(--muted);">${pctMastered}% mastered</span>
     </div>
-<div class="cc-btnrow">
-  <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
-  <button data-mode="browse" data-ch="${ch.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
-  <button data-mode="learn" data-ch="${ch.id}">📘 Learn<span class="btn-sub">study in small batches</span></button>
-</div>
+    <div class="cc-btnrow">
+      <button class="primary quick-btn" data-ch="${ch.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
+      <button data-mode="browse" data-ch="${ch.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
+      <button data-mode="learn" data-ch="${ch.id}">📘 Learn<span class="btn-sub">study in small batches</span></button>
+    </div>
   </div>`;
 }
 
@@ -1884,7 +1879,6 @@ function renderHome(){
   html += renderFocusSlider();
   html += renderDailyGoal();
 
-
   const visibleIds = settings.studyMode === "guided"
     ? chapters.filter(c => isUnlocked(c.id)).map(c => c.id)
     : chapters.map(c => c.id);
@@ -1894,17 +1888,17 @@ function renderHome(){
   }
   html += renderCarousel(visibleIds);
 
-const reviewCount = globalReviewPoolIds().length;
-html += `<div class="all-card">
-    <div class="ac-row">
-      <div>
-        <div class="cname">🔁 Review</div>
-        <div class="mini-stat">${reviewCount ? reviewCount + " card" + (reviewCount>1?"s":"") + " need practice" : "nothing to review — nice"}</div>
+  const reviewCount = globalReviewPoolIds().length;
+  html += `<div class="all-card">
+      <div class="ac-row">
+        <div>
+          <div class="cname">🔁 Review</div>
+          <div class="mini-stat">${reviewCount ? reviewCount + " card" + (reviewCount>1?"s":"") + " need practice" : "nothing to review — nice"}</div>
+        </div>
+        <button id="reviewBtn">Practice</button>
       </div>
-      <button id="reviewBtn">Practice</button>
-    </div>
-    <div class="ac-hint">Cards you've missed, plus anything you've studied that hasn't reached L3 yet.</div>
-  </div>`;
+      <div class="ac-hint">Cards you've missed, plus anything you've studied that hasn't reached L3 yet.</div>
+    </div>`;
 
   const masteredChapters = chapters.filter(ch => isMastered(ch.id));
   if (masteredChapters.length > 0) {
@@ -1949,21 +1943,19 @@ html += `<div class="all-card">
   wireFocusSlider();
   wireCarousel(visibleIds);
 
-
-
-const reviewBtn = document.getElementById("reviewBtn");
-if (reviewBtn) reviewBtn.addEventListener("click", startGlobalReview);
+  const reviewBtn = document.getElementById("reviewBtn");
+  if (reviewBtn) reviewBtn.addEventListener("click", startGlobalReview);
 
   const masteredBtn = document.getElementById("masteredBtn");
   if (masteredBtn) masteredBtn.addEventListener("click", renderCollection);
 
-document.querySelectorAll("[data-mode]").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    const ch = btn.dataset.ch, mode = btn.dataset.mode;
-    if (mode==="browse") startBrowse(ch);
-    else if (mode==="learn") startLearn(ch);
+  document.querySelectorAll("[data-mode]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const ch = btn.dataset.ch, mode = btn.dataset.mode;
+      if (mode==="browse") startBrowse(ch);
+      else if (mode==="learn") startLearn(ch);
+    });
   });
-});
   document.querySelectorAll(".quick-btn").forEach(btn=>{
     btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
   });
@@ -2197,14 +2189,12 @@ function renderQuick(){
       <div id="gradeArea"></div>
     `;
     document.getElementById("backBtn").addEventListener("click", ()=> { syncNow(); renderHome(); });
-document.getElementById("tapzone").addEventListener("click", ()=>{
-  markCardSeen(v.id);
-  document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
-    <div class="reading">${v.r}</div>
-    <div class="meaning">${v.m}</div>
-    <div class="sentence">${v.s}</div>
-  </div>`;
-  ...
+    document.getElementById("tapzone").addEventListener("click", ()=>{
+      markCardSeen(v.id);
+      document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
+        <div class="reading">${v.r}</div>
+        <div class="meaning">${v.m}</div>
+        <div class="sentence">${v.s}</div>
       </div>`;
       document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
         <button class="g-wrong" id="markWrong">✗ Wrong</button>
@@ -2538,6 +2528,7 @@ async function reviewAnswer(correct){
   syncNow();
   renderGlobalReview();
 }
+
 /* ================= STATS ================= */
 function renderStatsScreen(){
   screen = "stats";
@@ -2668,7 +2659,7 @@ function renderSettings(){
           <button class="seg-btn ${guided ? "active" : ""}" id="modeGuided">Guided<span class="sg-sub">one at a time</span></button>
           <button class="seg-btn ${free ? "active" : ""}" id="modeFree">Free<span class="sg-sub">all chapters open</span></button>
         </div>
-        <div class="hint">Guided: home shows one chapter, unlocks as you go, forces check-ins. Free: all chapters open.</div>
+        <div class="hint">Guided: home shows one chapter, unlocks as you go. Free: all chapters open.</div>
       </div>
       <div class="setting-row">
         <label>Mix in older cards</label>
