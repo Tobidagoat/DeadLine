@@ -354,6 +354,7 @@ async function loadLocal(){
 
 function showTopbar(loggedIn){
   document.getElementById("menuBtn").style.display = loggedIn ? "" : "none";
+  document.getElementById("chatBtn").style.display = loggedIn ? "" : "none";
   document.getElementById("streakBadge").style.display = loggedIn && computeCurrentStreak() > 0 ? "" : "none";
   document.getElementById("storageNote").style.display = loggedIn ? "flex" : "none";
   if (!loggedIn) document.getElementById("statusPill").style.display = "none";
@@ -927,17 +928,18 @@ async function fetchUnreadDmCount(){
       if (unreadDmCount > prev && prev >= 0 && dmThreadUserId === null) {
         playMessageSound();
       }
-      updateMenuButtonDot();
+            updateMenuButtonDot();
+      updateChatButtonDot();
     }
   } catch(e) {}
 }
-function updateMenuButtonDot(){
-  const btn = document.getElementById("menuBtn");
+function updateChatButtonDot(){
+  const btn = document.getElementById("chatBtn");
   if (!btn) return;
   if (unreadDmCount > 0) {
-    btn.innerHTML = '☰<span class="menu-dot"></span>';
+    btn.innerHTML = '💬<span class="menu-dot"></span>';
   } else {
-    btn.textContent = "☰";
+    btn.textContent = "💬";
   }
 }
 async function renderThreadsScreen(){
@@ -2894,8 +2896,8 @@ function renderSettings(){
     renderSettings();
   });
 }
-
 document.getElementById("menuBtn").addEventListener("click", renderMenu);
+document.getElementById("chatBtn").addEventListener("click", renderThreadsScreen);
 
 document.getElementById("importFile").addEventListener("change", async (e)=>{
   const file = e.target.files[0];
