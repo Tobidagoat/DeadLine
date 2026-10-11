@@ -247,7 +247,7 @@
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 18px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 60; text-align: center; max-width: 80vw; }
   .toast.show { opacity: 1; }
 
-  /* ================= LOGIN SCREEN (with warm aesthetic) ================= */
+  /* login screen with warm aesthetic */
   .login-bg {
     position: fixed;
     inset: 0;
@@ -282,10 +282,7 @@
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .login-brand {
-    text-align: center;
-    margin-bottom: 28px;
-  }
+  .login-brand { text-align: center; margin-bottom: 28px; }
   .login-brand .brand-mark {
     display: inline-flex;
     align-items: center;
@@ -468,8 +465,6 @@
   }
   .pw-toggle:hover { background: var(--accent-soft); }
   .pw-toggle.on { color: var(--seal); }
-
-  /* end login */
 
   .dialog-overlay { position: fixed; inset: 0; background: rgba(30,26,20,0.45); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; }
   .dialog { background: var(--paper); border-radius: 12px; padding: 22px 20px; max-width: 380px; width: 100%; box-shadow: 0 20px 50px rgba(42,36,28,0.25); }
@@ -814,17 +809,23 @@ function getSprintSkipDate(){
 function setSprintSkipDate(dateStr){
   try { localStorage.setItem(SPRINT_SKIP_DATE_KEY, dateStr); } catch(e){}
 }
+
+/* per-user scoped flags for onboarding + mode chosen */
+function userScopedKey(baseKey){
+  const id = (authUser && authUser.id) ? String(authUser.id) : "_anonymous";
+  return baseKey + "-u" + id;
+}
 function hasOnboarded(){
-  try { return localStorage.getItem(ONBOARDED_KEY) === "1"; } catch(e){ return false; }
+  try { return localStorage.getItem(userScopedKey(ONBOARDED_KEY)) === "1"; } catch(e){ return false; }
 }
 function setOnboarded(){
-  try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch(e){}
+  try { localStorage.setItem(userScopedKey(ONBOARDED_KEY), "1"); } catch(e){}
 }
 function hasChosenMode(){
-  try { return localStorage.getItem(K_MODE_CHOSEN) === "1"; } catch(e){ return false; }
+  try { return localStorage.getItem(userScopedKey(K_MODE_CHOSEN)) === "1"; } catch(e){ return false; }
 }
 function setChosenMode(){
-  try { localStorage.setItem(K_MODE_CHOSEN, "1"); } catch(e){}
+  try { localStorage.setItem(userScopedKey(K_MODE_CHOSEN), "1"); } catch(e){}
 }
 function getLastUserId(){
   try { return localStorage.getItem(LAST_USER_ID_KEY) || ""; } catch(e){ return ""; }
@@ -958,7 +959,6 @@ function ensureDailyIsToday(){
 }
 
 async function wipeUserLocalCache(){
-  // Wipes per-user local data but keeps chapters (they're shared across users)
   await Promise.all([
     storeDel(K_LOCAL_PROGRESS),
     storeDel(K_LOCAL_STREAKS),
@@ -970,7 +970,6 @@ async function wipeUserLocalCache(){
     storeDel(K_SETTINGS_DIRTY),
     storeDel(K_WEAK_DIRTY),
   ]);
-  // reset in-memory
   progress = {};
   streakDates = {};
   dirtyStreakDates = new Set();
@@ -1763,13 +1762,24 @@ function renderLogin(mode){
 
 async function afterLogin(){
   showTopbar(true);
-  // Check for user change first — if a different user's cache is sitting locally, wipe it
   const lastUserId = getLastUserId();
   const currentUserId = String(authUser.id);
   if (lastUserId && lastUserId !== currentUserId) {
     await wipeUserLocalCache();
   }
   setLastUserId(currentUserId);
+
+  // one-time migration: legacy global onboarding/mode flags → per-user scoped flags
+  try {
+    const scopedOnboard = userScopedKey(ONBOARDED_KEY);
+    const scopedMode = userScopedKey(K_MODE_CHOSEN);
+    if (!localStorage.getItem(scopedOnboard) && localStorage.getItem(ONBOARDED_KEY) === "1") {
+      localStorage.setItem(scopedOnboard, "1");
+    }
+    if (!localStorage.getItem(scopedMode) && localStorage.getItem(K_MODE_CHOSEN) === "1") {
+      localStorage.setItem(scopedMode, "1");
+    }
+  } catch(e) {}
 
   await loadLocal();
   updateStreakBadge();
