@@ -2401,3 +2401,13 @@ textarea:focus {
     max-width: 1040px;
   }
 }
+
+/* Makes the medal emojis align nicely in the leaderboard */
+.manage-row {
+  align-items: center;
+}
+
+/* Hover effect for the audio speaker */
+.reading[onclick]:hover {
+  opacity: 0.8;
+}

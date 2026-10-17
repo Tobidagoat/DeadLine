@@ -35,14 +35,7 @@ function hashChapter(name, cards) {
   h.update(kanjiList.join("\n"));
   return h.digest("hex");
 }
-app.patch("/api/vocab/lessons/:id", auth, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  const { name } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
-  const trimmed = name.trim();
-  await pool.query("UPDATE vocab_lessons SET name = ? WHERE id = ?", [trimmed, id]);
-  res.json({ ok: true, id, name: trimmed });
-});
+
 function sign(user) {
   return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
 }
@@ -196,7 +189,7 @@ app.patch("/api/me", auth, async (req, res) => {
   res.json({ user: publicUser(rows[0]) });
 });
 
-/* ---------- presence ---------- */
+/* ---------- presence & leaderboard ---------- */
 app.get("/api/presence", auth, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT u.id, u.username, u.display_name, u.avatar_emoji,
@@ -218,6 +211,27 @@ app.get("/api/presence", auth, async (req, res) => {
   })) });
 });
 
+app.get("/api/leaderboard", auth, async (req, res) => {
+  const today = new Date().toISOString().slice(0,10);
+  const [rows] = await pool.query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_emoji,
+            COUNT(DISTINCT d.card_id) AS today_count
+     FROM users u
+     LEFT JOIN daily_seen d ON d.user_id = u.id AND d.card_type = 'kanji' AND d.seen_date = ?
+     GROUP BY u.id
+     ORDER BY today_count DESC, u.id ASC
+     LIMIT 10`,
+    [today]
+  );
+  res.json({ leaderboard: rows.map(r => ({
+    id: r.id,
+    username: r.username,
+    display_name: r.display_name || r.username,
+    avatar_emoji: r.avatar_emoji || null,
+    today_count: r.today_count
+  })) });
+});
+
 app.post("/api/activity", auth, async (req, res) => {
   const { chapter_id, activity } = req.body || {};
   const validActivities = ["browse", "learn", "quick", "review", "idle", null];
@@ -230,7 +244,7 @@ app.post("/api/activity", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- reactions & notifications ---------- */
+/* ---------- reactions & invites ---------- */
 const VALID_EMOJI = ["🔥", "👋", "💪", "😅", "🤔", "🎮"];
 const VALID_KINDS = ["reaction", "quiz_invite"];
 
@@ -307,7 +321,7 @@ app.post("/api/settings", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- weak cards sync ---------- */
+/* ---------- weak & daily sync ---------- */
 app.get("/api/weak", auth, async (req, res) => {
   const cardType = normalizeCardType(req.query.card_type);
   const [rows] = await pool.query(
@@ -335,16 +349,6 @@ app.post("/api/weak", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/weak/:cardType/:cardId", auth, async (req, res) => {
-  const cardType = normalizeCardType(req.params.cardType);
-  await pool.query(
-    "DELETE FROM weak_cards WHERE user_id = ? AND card_type = ? AND card_id = ?",
-    [req.user.id, cardType, Number(req.params.cardId)]
-  );
-  res.json({ ok: true });
-});
-
-/* ---------- daily seen sync ---------- */
 app.get("/api/daily", auth, async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0,10);
   const cardType = normalizeCardType(req.query.card_type);
@@ -365,7 +369,7 @@ app.post("/api/daily", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- chapters (kanji) ---------- */
+/* ---------- chapters ---------- */
 app.get("/api/chapters", auth, async (req, res) => {
   const [rows] = await pool.query(
     "SELECT id, name, card_count, created_by, created_at, updated_at FROM chapters ORDER BY id ASC"
@@ -489,175 +493,6 @@ app.post("/api/streak", auth, async (req, res) => {
   if (dates.length === 0) return res.json({ ok: true });
   const values = dates.map(d => [req.user.id, d]);
   await pool.query("INSERT IGNORE INTO streaks (user_id, date) VALUES ?", [values]);
-  res.json({ ok: true });
-});
-
-/* =========================================================
-   KOTOBA (vocabulary) routes
-   ========================================================= */
-
-/* list all units + lessons (for the Kotoba home screen) */
-app.get("/api/vocab/units", auth, async (req, res) => {
-  const [units] = await pool.query(
-    "SELECT id, name, position FROM vocab_units ORDER BY position ASC, id ASC"
-  );
-  const [lessons] = await pool.query(
-    `SELECT l.id, l.unit_id, l.name, l.position,
-            COUNT(c.id) AS card_count
-     FROM vocab_lessons l
-     LEFT JOIN vocab_cards c ON c.lesson_id = l.id
-     GROUP BY l.id
-     ORDER BY l.position ASC, l.id ASC`
-  );
-  res.json({ units, lessons });
-});
-
-/* full lesson detail: lesson + all cards (grouped client-side) */
-app.get("/api/vocab/lessons/:id", auth, async (req, res) => {
-  const id = Number(req.params.id);
-  const [lessonRows] = await pool.query(
-    `SELECT l.id, l.unit_id, l.name, u.name AS unit_name
-     FROM vocab_lessons l JOIN vocab_units u ON u.id = l.unit_id
-     WHERE l.id = ?`,
-    [id]
-  );
-  if (lessonRows.length === 0) return res.status(404).json({ error: "not found" });
-  const [cards] = await pool.query(
-    `SELECT id, group_title, group_kind, position, kind,
-            kanji, kana, meaning, def_ja, note, sentence
-     FROM vocab_cards WHERE lesson_id = ? ORDER BY position ASC, id ASC`,
-    [id]
-  );
-  res.json({ lesson: lessonRows[0], cards });
-});
-
-/* import one lesson at a time (admin only).
-   Body: { unit, lesson, groups: [{ title, kind, cards: [...] }] }
-   Creates the unit and lesson if they don't exist. Appends cards. */
-app.post("/api/vocab/import", auth, adminOnly, async (req, res) => {
-  const { unit, lesson, groups } = req.body || {};
-  if (!unit || !lesson || !Array.isArray(groups) || groups.length === 0) {
-    return res.status(400).json({ error: "unit, lesson, and non-empty groups array required" });
-  }
-
-  const cleanedGroups = groups.map(g => {
-    const kind = (g.kind === "meaning") ? "meaning" : "reading";
-    const title = String(g.title || "").trim().slice(0, 100);
-    const cards = (Array.isArray(g.cards) ? g.cards : []).map(c => ({
-      kanji: String(c.kanji || "").trim().slice(0, 200),
-      kana: String(c.kana || "").trim().slice(0, 200),
-      meaning: String(c.meaning || "").trim().slice(0, 500),
-      def_ja: String(c.def_ja || "").trim().slice(0, 500),
-      note: String(c.note || "").trim().slice(0, 500),
-      sentence: String(c.sentence || "").trim(),
-    })).filter(c => c.kana && (c.kanji || c.kana));
-    return { kind, title, cards };
-  }).filter(g => g.cards.length > 0);
-
-  if (cleanedGroups.length === 0) {
-    return res.status(400).json({ error: "no valid cards" });
-  }
-
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-
-    // unit (upsert by name)
-    const [uRows] = await conn.query("SELECT id FROM vocab_units WHERE name = ?", [unit]);
-    let unitId;
-    if (uRows.length > 0) {
-      unitId = uRows[0].id;
-    } else {
-      const [maxPos] = await conn.query("SELECT COALESCE(MAX(position), -1) + 1 AS p FROM vocab_units");
-      const [r] = await conn.query(
-        "INSERT INTO vocab_units (name, position) VALUES (?, ?)",
-        [unit, maxPos[0].p]
-      );
-      unitId = r.insertId;
-    }
-
-    // lesson (upsert by unit_id + name)
-    const [lRows] = await conn.query(
-      "SELECT id FROM vocab_lessons WHERE unit_id = ? AND name = ?",
-      [unitId, lesson]
-    );
-    let lessonId;
-    if (lRows.length > 0) {
-      lessonId = lRows[0].id;
-    } else {
-      const [maxPos] = await conn.query(
-        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM vocab_lessons WHERE unit_id = ?",
-        [unitId]
-      );
-      const [r] = await conn.query(
-        "INSERT INTO vocab_lessons (unit_id, name, position) VALUES (?, ?, ?)",
-        [unitId, lesson, maxPos[0].p]
-      );
-      lessonId = r.insertId;
-    }
-
-    // starting position (append after existing cards in this lesson)
-    const [posRow] = await conn.query(
-      "SELECT COALESCE(MAX(position), -1) + 1 AS start FROM vocab_cards WHERE lesson_id = ?",
-      [lessonId]
-    );
-    let pos = posRow[0].start;
-
-    const values = [];
-    for (const g of cleanedGroups) {
-      for (const c of g.cards) {
-        values.push([
-          lessonId, g.title, g.kind, pos++,
-          g.kind,               // card kind defaults to group kind
-          c.kanji, c.kana, c.meaning, c.def_ja, c.note, c.sentence,
-        ]);
-      }
-    }
-
-    await conn.query(
-      `INSERT INTO vocab_cards
-       (lesson_id, group_title, group_kind, position, kind, kanji, kana, meaning, def_ja, note, sentence)
-       VALUES ?`,
-      [values]
-    );
-
-    await conn.commit();
-    res.json({
-      ok: true,
-      unit_id: unitId,
-      lesson_id: lessonId,
-      cards_added: values.length,
-    });
-  } catch (e) {
-    await conn.rollback();
-    console.error(e);
-    res.status(500).json({ error: "server error", detail: e.message });
-  } finally {
-    conn.release();
-  }
-});
-app.patch("/api/vocab/units/:id", auth, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  const { name } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
-  await pool.query("UPDATE vocab_units SET name = ? WHERE id = ?", [name.trim(), id]);
-  res.json({ ok: true });
-});
-/* delete a whole unit (admin only) */
-app.delete("/api/vocab/units/:id", auth, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  const [rows] = await pool.query("SELECT id FROM vocab_units WHERE id = ?", [id]);
-  if (rows.length === 0) return res.status(404).json({ error: "not found" });
-  await pool.query("DELETE FROM vocab_units WHERE id = ?", [id]);
-  res.json({ ok: true });
-});
-
-/* delete a lesson (admin only) */
-app.delete("/api/vocab/lessons/:id", auth, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  const [rows] = await pool.query("SELECT id FROM vocab_lessons WHERE id = ?", [id]);
-  if (rows.length === 0) return res.status(404).json({ error: "not found" });
-  await pool.query("DELETE FROM vocab_lessons WHERE id = ?", [id]);
   res.json({ ok: true });
 });
 
