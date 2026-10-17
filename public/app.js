@@ -140,12 +140,6 @@ function getLastUsername(){
 function setLastUsername(u){
   try { localStorage.setItem(LAST_USERNAME_KEY, u); } catch(e){}
 }
-function getSprintSkipDate(){
-  try { return localStorage.getItem(SPRINT_SKIP_DATE_KEY) || ""; } catch(e){ return ""; }
-}
-function setSprintSkipDate(dateStr){
-  try { localStorage.setItem(SPRINT_SKIP_DATE_KEY, dateStr); } catch(e){}
-}
 
 function userScopedKey(baseKey){
   const id = (authUser && authUser.id) ? String(authUser.id) : "_anonymous";
@@ -808,19 +802,9 @@ function openUserCard(u){
   overlay.addEventListener("click", (e)=>{ if (e.target === overlay) close(); });
   document.getElementById("ucClose").addEventListener("click", close);
   const inviteBtn = document.getElementById("ucInvite");
-  if (inviteBtn) inviteBtn.addEventListener("click", async ()=>{
-    inviteBtn.disabled = true;
-    const r = await api("/api/reactions", {
-      method: "POST",
-      body: JSON.stringify({ to_user_id: u.id, emoji: "🎮", kind: "quiz_invite" })
-    });
-    if (r.ok) {
-      toast(`Invited ${name} to a quiz`);
-      close();
-    } else {
-      inviteBtn.disabled = false;
-      toast(r.body && r.body.error ? r.body.error : "Failed to send invite");
-    }
+  if (inviteBtn) inviteBtn.addEventListener("click", ()=>{
+    close();
+    renderInvitePicker(u);
   });
   overlay.querySelectorAll(".reaction-btn").forEach(btn => {
     btn.addEventListener("click", async ()=>{
@@ -841,6 +825,49 @@ function openUserCard(u){
   });
 }
 
+function renderInvitePicker(targetUser){
+  screen = "invite-picker";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  
+  // Get all unlocked chapters
+  const unlocked = chapters.filter(c => isUnlocked(c.id));
+  
+  let rows = unlocked.map(ch => {
+    return `<div class="manage-row" style="cursor:pointer;" onclick="sendInvite(${targetUser.id}, ${ch.serverId}, '${cleanChapterName(ch.name)}')">
+      <span class="rname" style="font-weight:700;">${cleanChapterName(ch.name)}</span>
+      <div style="font-size:12px; color:var(--seal); font-weight:700;">Invite →</div>
+    </div>`;
+  }).join("");
+
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← cancel</button><span class="screen-title">Invite ${targetUser.display_name || targetUser.username}</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="font-size:13px; color:var(--muted); text-align:center; margin-bottom:16px;">
+        Pick a chapter to study together. They'll get a notification to join.
+      </div>
+      ${rows || '<div class="empty"><p>No unlocked chapters yet.</p></div>'}
+    </div>`;
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+}
+
+window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
+  const r = await api("/api/reactions", {
+    method: "POST",
+    body: JSON.stringify({ 
+      to_user_id: toUserId, 
+      emoji: "🎮", 
+      kind: "quiz_invite",
+      payload: { chapter_id: chapterServerId, chapter_name: chapterName }
+    })
+  });
+  if (r.ok) {
+    toast(`Invite sent!`);
+    renderHome();
+  } else {
+    toast("Failed to send invite");
+  }
+};
+
 async function checkUnseenReactions(){
   if (!authToken) return;
   try {
@@ -854,16 +881,21 @@ async function checkUnseenReactions(){
       playReactionSound(rx.emoji);
       const el = document.createElement("div");
       el.className = "reaction-toast";
-      const text = kind === "quiz_invite"
-        ? `<b>${rx.from_display_name}</b> wants to study together!`
-        : `<b>${rx.from_display_name}</b> sent you a reaction`;
+      
+      let text = `<b>${rx.from_display_name}</b> sent you a reaction`;
+      if (kind === "quiz_invite" && rx.payload && rx.payload.chapter_name) {
+        text = `<b>${rx.from_display_name}</b> invited you to study ${rx.payload.chapter_name}!`;
+      }
+
       el.innerHTML = `<span class="rt-emoji">${rx.emoji}</span><span class="rt-text">${text}</span>`;
       document.body.appendChild(el);
-      setTimeout(()=> el.remove(), 3500);
+      setTimeout(()=> el.remove(), 4000);
+      
       notifications.push({
         id: rx.id,
         emoji: rx.emoji,
         kind,
+        payload: rx.payload,
         from_user_id: rx.from_user_id,
         from_display_name: rx.from_display_name,
         created_at: rx.created_at,
@@ -899,12 +931,13 @@ async function renderNotificationsScreen(){
       <p>Reactions and study invites will show up here.</p></div></div>`;
   } else {
     listHtml = `<div class="panel" style="padding:0;">` + notifications.slice().reverse().map(n => {
-      const title = n.kind === "quiz_invite"
-        ? `${n.from_display_name} wants to study together`
-        : `${n.from_display_name} sent ${n.emoji}`;
+      let title = `${n.from_display_name} sent ${n.emoji}`;
+      if (n.kind === "quiz_invite" && n.payload) {
+        title = `${n.from_display_name} wants to study ${n.payload.chapter_name}`;
+      }
       
-      const actionBtn = n.kind === "quiz_invite"
-        ? `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="startSharedQuiz()">Start Quiz ⚡</button>`
+      const actionBtn = (n.kind === "quiz_invite" && n.payload)
+        ? `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="acceptInvite('${n.payload.chapter_id}')">Accept & Study ⚡</button>`
         : "";
 
       return `<div class="notif-row">
@@ -923,15 +956,14 @@ async function renderNotificationsScreen(){
   document.getElementById("backBtn").addEventListener("click", renderHome);
 }
 
-window.startSharedQuiz = function() {
-  // A simple way to do a "shared quiz" is just to launch a random Quick Session 
-  // from the user's unlocked chapters, pretending it's a shared event.
-  const chId = firstUnmasteredChapterId();
-  if (chId) {
-    startQuick(chId, "flash");
+window.acceptInvite = function(serverChapterId) {
+  // Find local chapter by server ID
+  const localCh = chapters.find(c => String(c.serverId) === String(serverChapterId));
+  if (localCh) {
+    startQuick(localCh.id, "flash");
     toast("Shared quiz started!");
   } else {
-    toast("No chapters unlocked yet");
+    toast("Couldn't find that chapter.");
   }
 };
 
