@@ -9,7 +9,7 @@ const path = require("path");
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -74,6 +74,11 @@ function publicUser(row) {
   };
 }
 
+const VALID_CARD_TYPES = ["kanji", "vocab"];
+function normalizeCardType(t) {
+  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
+}
+
 async function seedUsers() {
   const users = [
     { name: process.env.SEED_USER_1, pass: process.env.SEED_PASSWORD },
@@ -92,7 +97,14 @@ async function seedUsers() {
 }
 
 /* ---------- health ---------- */
-app.get("/api/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get("/api/health", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ ok: true, db: true, time: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ ok: false, db: false, error: e.code || e.message });
+  }
+});
 
 /* ---------- auth ---------- */
 app.post("/api/auth/register", async (req, res) => {
@@ -290,48 +302,63 @@ app.post("/api/settings", auth, async (req, res) => {
 
 /* ---------- weak cards sync ---------- */
 app.get("/api/weak", auth, async (req, res) => {
-  const [rows] = await pool.query("SELECT card_id, misses FROM weak_cards WHERE user_id = ?", [req.user.id]);
-  res.json({ weak: rows });
+  const cardType = normalizeCardType(req.query.card_type);
+  const [rows] = await pool.query(
+    "SELECT card_id, misses FROM weak_cards WHERE user_id = ? AND card_type = ?",
+    [req.user.id, cardType]
+  );
+  res.json({ weak: rows, card_type: cardType });
 });
 
 app.post("/api/weak", auth, async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : null;
   if (!items) return res.status(400).json({ error: "items array required" });
   if (items.length === 0) return res.json({ ok: true });
-  const values = items.map(it => [req.user.id, Number(it.card_id), Math.max(0, Number(it.misses) || 0)]);
+  const values = items.map(it => [
+    req.user.id,
+    normalizeCardType(it.card_type),
+    Number(it.card_id),
+    Math.max(0, Number(it.misses) || 0),
+  ]);
   await pool.query(
-    `INSERT INTO weak_cards (user_id, card_id, misses) VALUES ?
+    `INSERT INTO weak_cards (user_id, card_type, card_id, misses) VALUES ?
      ON DUPLICATE KEY UPDATE misses = VALUES(misses)`,
     [values]
   );
   res.json({ ok: true });
 });
 
-app.delete("/api/weak/:cardId", auth, async (req, res) => {
-  await pool.query("DELETE FROM weak_cards WHERE user_id = ? AND card_id = ?", [req.user.id, Number(req.params.cardId)]);
+app.delete("/api/weak/:cardType/:cardId", auth, async (req, res) => {
+  const cardType = normalizeCardType(req.params.cardType);
+  await pool.query(
+    "DELETE FROM weak_cards WHERE user_id = ? AND card_type = ? AND card_id = ?",
+    [req.user.id, cardType, Number(req.params.cardId)]
+  );
   res.json({ ok: true });
 });
 
 /* ---------- daily seen sync ---------- */
 app.get("/api/daily", auth, async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0,10);
+  const cardType = normalizeCardType(req.query.card_type);
   const [rows] = await pool.query(
-    "SELECT card_id FROM daily_seen WHERE user_id = ? AND seen_date = ?",
-    [req.user.id, date]
+    "SELECT card_id FROM daily_seen WHERE user_id = ? AND card_type = ? AND seen_date = ?",
+    [req.user.id, cardType, date]
   );
-  res.json({ date, cardIds: rows.map(r => r.card_id) });
+  res.json({ date, card_type: cardType, cardIds: rows.map(r => r.card_id) });
 });
 
 app.post("/api/daily", auth, async (req, res) => {
   const { date, cardIds } = req.body || {};
+  const cardType = normalizeCardType(req.body?.card_type);
   if (!date || !Array.isArray(cardIds)) return res.status(400).json({ error: "date and cardIds required" });
   if (cardIds.length === 0) return res.json({ ok: true });
-  const values = cardIds.map(cid => [req.user.id, Number(cid), date]);
-  await pool.query("INSERT IGNORE INTO daily_seen (user_id, card_id, seen_date) VALUES ?", [values]);
+  const values = cardIds.map(cid => [req.user.id, cardType, Number(cid), date]);
+  await pool.query("INSERT IGNORE INTO daily_seen (user_id, card_type, card_id, seen_date) VALUES ?", [values]);
   res.json({ ok: true });
 });
 
-/* ---------- chapters ---------- */
+/* ---------- chapters (kanji) ---------- */
 app.get("/api/chapters", auth, async (req, res) => {
   const [rows] = await pool.query(
     "SELECT id, name, card_count, created_by, created_at, updated_at FROM chapters ORDER BY id ASC"
@@ -408,11 +435,12 @@ app.delete("/api/chapters/:id", auth, adminOnly, async (req, res) => {
 
 /* ---------- progress ---------- */
 app.get("/api/progress", auth, async (req, res) => {
+  const cardType = normalizeCardType(req.query.card_type);
   const [rows] = await pool.query(
-    "SELECT card_id, box, due, misses, last_seen, level2_at FROM progress WHERE user_id = ?",
-    [req.user.id]
+    "SELECT card_id, box, due, misses, last_seen, level2_at FROM progress WHERE user_id = ? AND card_type = ?",
+    [req.user.id, cardType]
   );
-  res.json({ progress: rows });
+  res.json({ progress: rows, card_type: cardType });
 });
 
 app.post("/api/progress", auth, async (req, res) => {
@@ -421,6 +449,7 @@ app.post("/api/progress", auth, async (req, res) => {
   if (items.length === 0) return res.json({ ok: true, updated: 0 });
   const values = items.map(it => [
     req.user.id,
+    normalizeCardType(it.card_type),
     Number(it.card_id),
     Math.max(0, Math.min(5, Number(it.box) || 0)),
     it.due ? new Date(it.due) : null,
@@ -429,7 +458,7 @@ app.post("/api/progress", auth, async (req, res) => {
     it.level2_at ? new Date(it.level2_at) : null,
   ]);
   await pool.query(
-    `INSERT INTO progress (user_id, card_id, box, due, misses, last_seen, level2_at)
+    `INSERT INTO progress (user_id, card_type, card_id, box, due, misses, last_seen, level2_at)
      VALUES ?
      ON DUPLICATE KEY UPDATE
        box = IF(VALUES(last_seen) >= last_seen, VALUES(box), box),
@@ -456,6 +485,169 @@ app.post("/api/streak", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+/* =========================================================
+   KOTOBA (vocabulary) routes
+   ========================================================= */
+
+/* list all units + lessons (for the Kotoba home screen) */
+app.get("/api/vocab/units", auth, async (req, res) => {
+  const [units] = await pool.query(
+    "SELECT id, name, position FROM vocab_units ORDER BY position ASC, id ASC"
+  );
+  const [lessons] = await pool.query(
+    `SELECT l.id, l.unit_id, l.name, l.position,
+            COUNT(c.id) AS card_count
+     FROM vocab_lessons l
+     LEFT JOIN vocab_cards c ON c.lesson_id = l.id
+     GROUP BY l.id
+     ORDER BY l.position ASC, l.id ASC`
+  );
+  res.json({ units, lessons });
+});
+
+/* full lesson detail: lesson + all cards (grouped client-side) */
+app.get("/api/vocab/lessons/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  const [lessonRows] = await pool.query(
+    `SELECT l.id, l.unit_id, l.name, u.name AS unit_name
+     FROM vocab_lessons l JOIN vocab_units u ON u.id = l.unit_id
+     WHERE l.id = ?`,
+    [id]
+  );
+  if (lessonRows.length === 0) return res.status(404).json({ error: "not found" });
+  const [cards] = await pool.query(
+    `SELECT id, group_title, group_kind, position, kind,
+            kanji, kana, meaning, def_ja, note, sentence
+     FROM vocab_cards WHERE lesson_id = ? ORDER BY position ASC, id ASC`,
+    [id]
+  );
+  res.json({ lesson: lessonRows[0], cards });
+});
+
+/* import one lesson at a time (admin only).
+   Body: { unit, lesson, groups: [{ title, kind, cards: [...] }] }
+   Creates the unit and lesson if they don't exist. Appends cards. */
+app.post("/api/vocab/import", auth, adminOnly, async (req, res) => {
+  const { unit, lesson, groups } = req.body || {};
+  if (!unit || !lesson || !Array.isArray(groups) || groups.length === 0) {
+    return res.status(400).json({ error: "unit, lesson, and non-empty groups array required" });
+  }
+
+  const cleanedGroups = groups.map(g => {
+    const kind = (g.kind === "meaning") ? "meaning" : "reading";
+    const title = String(g.title || "").trim().slice(0, 100);
+    const cards = (Array.isArray(g.cards) ? g.cards : []).map(c => ({
+      kanji: String(c.kanji || "").trim().slice(0, 200),
+      kana: String(c.kana || "").trim().slice(0, 200),
+      meaning: String(c.meaning || "").trim().slice(0, 500),
+      def_ja: String(c.def_ja || "").trim().slice(0, 500),
+      note: String(c.note || "").trim().slice(0, 500),
+      sentence: String(c.sentence || "").trim(),
+    })).filter(c => c.kana && (c.kanji || c.kana));
+    return { kind, title, cards };
+  }).filter(g => g.cards.length > 0);
+
+  if (cleanedGroups.length === 0) {
+    return res.status(400).json({ error: "no valid cards" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // unit (upsert by name)
+    const [uRows] = await conn.query("SELECT id FROM vocab_units WHERE name = ?", [unit]);
+    let unitId;
+    if (uRows.length > 0) {
+      unitId = uRows[0].id;
+    } else {
+      const [maxPos] = await conn.query("SELECT COALESCE(MAX(position), -1) + 1 AS p FROM vocab_units");
+      const [r] = await conn.query(
+        "INSERT INTO vocab_units (name, position) VALUES (?, ?)",
+        [unit, maxPos[0].p]
+      );
+      unitId = r.insertId;
+    }
+
+    // lesson (upsert by unit_id + name)
+    const [lRows] = await conn.query(
+      "SELECT id FROM vocab_lessons WHERE unit_id = ? AND name = ?",
+      [unitId, lesson]
+    );
+    let lessonId;
+    if (lRows.length > 0) {
+      lessonId = lRows[0].id;
+    } else {
+      const [maxPos] = await conn.query(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM vocab_lessons WHERE unit_id = ?",
+        [unitId]
+      );
+      const [r] = await conn.query(
+        "INSERT INTO vocab_lessons (unit_id, name, position) VALUES (?, ?, ?)",
+        [unitId, lesson, maxPos[0].p]
+      );
+      lessonId = r.insertId;
+    }
+
+    // starting position (append after existing cards in this lesson)
+    const [posRow] = await conn.query(
+      "SELECT COALESCE(MAX(position), -1) + 1 AS start FROM vocab_cards WHERE lesson_id = ?",
+      [lessonId]
+    );
+    let pos = posRow[0].start;
+
+    const values = [];
+    for (const g of cleanedGroups) {
+      for (const c of g.cards) {
+        values.push([
+          lessonId, g.title, g.kind, pos++,
+          g.kind,               // card kind defaults to group kind
+          c.kanji, c.kana, c.meaning, c.def_ja, c.note, c.sentence,
+        ]);
+      }
+    }
+
+    await conn.query(
+      `INSERT INTO vocab_cards
+       (lesson_id, group_title, group_kind, position, kind, kanji, kana, meaning, def_ja, note, sentence)
+       VALUES ?`,
+      [values]
+    );
+
+    await conn.commit();
+    res.json({
+      ok: true,
+      unit_id: unitId,
+      lesson_id: lessonId,
+      cards_added: values.length,
+    });
+  } catch (e) {
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({ error: "server error", detail: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
+/* delete a whole unit (admin only) */
+app.delete("/api/vocab/units/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query("SELECT id FROM vocab_units WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "not found" });
+  await pool.query("DELETE FROM vocab_units WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+/* delete a lesson (admin only) */
+app.delete("/api/vocab/lessons/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query("SELECT id FROM vocab_lessons WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "not found" });
+  await pool.query("DELETE FROM vocab_lessons WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
 /* ---------- static frontend ---------- */
 app.use(express.static(path.join(__dirname, "public")));
 app.get(/^\/(?!api\/).*/, (req, res) => {
@@ -471,7 +663,6 @@ app.get(/^\/(?!api\/).*/, (req, res) => {
     const port = Number(process.env.PORT || 3000);
     app.listen(port, "0.0.0.0", () => {
       console.log(`server listening on http://0.0.0.0:${port}`);
-      console.log(`open the app at http://localhost:${port}`);
     });
   } catch (e) {
     console.error("startup failed:", e.message);
