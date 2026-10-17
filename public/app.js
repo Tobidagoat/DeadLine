@@ -1934,7 +1934,7 @@ function renderKotobaCard(lesson){
     </div>
     <div class="cc-btnrow" style="grid-template-columns: 1fr 1fr;">
       <button class="primary quick-btn" data-vlesson="${lesson.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
-      <button data-vmode="browse" data-vlesson="${lesson.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
+      <button data-vmode="browse" data-vlesson="${lesson.id}" style="grid-column: 1 / -1;">👁 Browse<span class="btn-sub">read through all cards</span></button>
     </div>
   </div>`;
 }
@@ -3157,7 +3157,7 @@ function renderKotobaBrowse(lessonId){
 
   app.innerHTML = `<div class="backrow"><button id="backBtn">← ${lesson.name}</button><span class="screen-title">Browse</span></div>
     ${html || '<div class="empty"><p>No cards.</p></div>'}`;
-  document.getElementById("backBtn").addEventListener("click", () => renderKotobaLessonPicker(lessonId));
+  document.getElementById("backBtn").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
 }
 
 let vocabQuickQueue = [], vocabQuickTotal = 0, vocabQuickMiss = {}, vocabQuickLessonId = null;
