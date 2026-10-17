@@ -908,7 +908,7 @@ async function fetchPresence(){
     const r = await api("/api/presence");
     if (r.ok && r.body && r.body.users) {
       presenceUsers = r.body.users;
-      if (screen === "home") renderPresenceStrip();
+      if (screen === "home" && currentTab === "kanji") renderPresenceStrip();
     }
   } catch(e) {}
 }
@@ -930,7 +930,7 @@ async function pushActivity(chapterId, activity){
         method: "POST",
         body: JSON.stringify({ chapter_id: serverChId, activity: currentActivityKind })
       });
-      if (screen === "home") fetchPresence();
+      if (screen === "home" && currentTab === "kanji") fetchPresence();
     } catch(e) {}
   }, 150);
 }
@@ -1788,6 +1788,8 @@ function renderMenu(){
 }
 
 /* ================= HOME ================= */
+let currentTab = "kanji"; // "kanji" | "kotoba"
+
 function daysUntil(dateStr){
   const target = new Date(dateStr + "T00:00:00");
   const today = new Date();
@@ -1993,15 +1995,7 @@ function wireCarousel(chapterIds){
   }
 }
 
-function renderHome(){
-  screen = "home"; activeChapterId = null;
-  showTopbar(true);
-  pushActivity(null, null);
-  const app = document.getElementById("app");
-  updateStreakBadge();
-  updateUserLine();
-  detectDemotions();
-
+function renderKanjiHome(){
   let html = `<div id="presenceStrip"></div>`;
   html += renderFocusSlider();
   html += renderDailyGoal();
@@ -2018,7 +2012,6 @@ function renderHome(){
       saveCurrentChapter();
     }
     
-    // Fix 2: Hide mastered from carousel
     const visibleIds = settings.studyMode === "guided"
       ? chapters.filter(c => isUnlocked(c.id) && !isMastered(c.id)).map(c => c.id)
       : chapters.filter(c => !isMastered(c.id)).map(c => c.id);
@@ -2028,13 +2021,11 @@ function renderHome(){
       saveCurrentChapter();
     }
     
-    // Only show carousel if there's something to study
     if (visibleIds.length > 0) {
       html += renderCarousel(visibleIds);
     }
   }
 
-  // Global Review (Kanji)
   const reviewCount = globalReviewPoolIds().length;
   html += `<div class="all-card">
       <div class="ac-row">
@@ -2047,21 +2038,6 @@ function renderHome(){
       <div class="ac-hint">Cards you've missed, plus anything you've studied that hasn't reached L3 yet.</div>
     </div>`;
 
-  // Kotoba Section
-  const vocabCardCount = VOCAB_QUIZ.length;
-  const vocabLessonCount = vocabLessons.length;
-  html += `<div class="all-card" style="background: var(--blue-soft);">
-      <div class="ac-row">
-        <div>
-          <div class="cname">📖 Kotoba</div>
-          <div class="mini-stat">${vocabLessonCount} lesson${vocabLessonCount===1?"":"s"} · ${vocabCardCount} word${vocabCardCount===1?"":"s"}</div>
-        </div>
-        <button id="kotobaBtn" style="background: var(--blue);">Open</button>
-      </div>
-      <div class="ac-hint">Vocabulary flashcards — separate from kanji. Grouped by chapter.</div>
-    </div>`;
-
-  // Mastered Section
   const masteredChapters = chapters.filter(ch => isMastered(ch.id));
   if (masteredChapters.length > 0) {
     const totalMasteredCards = masteredChapters.reduce((s, ch) => s + ch.cards.length, 0);
@@ -2077,7 +2053,6 @@ function renderHome(){
     </div>`;
   }
 
-  // All Chapters List
   html += `<div class="list-toggle" id="listToggle">▾ All kanji chapters (${chapters.length})</div>`;
   html += `<div class="list-hint">Tap to see every chapter and its progress</div>`;
   html += `<div id="allChaptersList" style="display:none;">`;
@@ -2101,64 +2076,138 @@ function renderHome(){
     </div>`;
   });
   html += `</div>`;
+  return html;
+}
 
-  app.innerHTML = html;
-  
-  if (chapters.length > 0) {
-    wireFocusSlider();
-    const visibleIds = settings.studyMode === "guided"
-      ? chapters.filter(c => isUnlocked(c.id) && !isMastered(c.id)).map(c => c.id)
-      : chapters.filter(c => !isMastered(c.id)).map(c => c.id);
-    if (visibleIds.length > 0) wireCarousel(visibleIds);
+function renderKotobaHomeTab(){
+  if (!vocabLessons.length) {
+    return `<div class="card"><div class="empty"><div class="big">📖</div>
+      <div style="font-size:16px;font-weight:700;">No vocab yet</div>
+      <p>${isAdmin() ? 'Open the ☰ menu → "Import kotoba" to add your first lesson.' : "Ask Tobi to import some vocab."}</p></div></div>
+      ${isAdmin() ? '<button class="small-btn" id="firstImportVocab">Import kotoba</button>' : ""}`;
   }
 
-  const fb = document.getElementById("firstImport");
-  if (fb) fb.addEventListener("click", ()=> document.getElementById("importFile").click());
-
-  const reviewBtn = document.getElementById("reviewBtn");
-  if (reviewBtn) reviewBtn.addEventListener("click", startGlobalReview);
-
-  const kotobaBtn = document.getElementById("kotobaBtn");
-  if (kotobaBtn) kotobaBtn.addEventListener("click", renderKotobaHome);
-
-  const masteredBtn = document.getElementById("masteredBtn");
-  if (masteredBtn) masteredBtn.addEventListener("click", renderCollection);
-
-  document.querySelectorAll("[data-mode]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const ch = btn.dataset.ch, mode = btn.dataset.mode;
-      if (mode==="browse") startBrowse(ch);
-      else if (mode==="learn") startLearn(ch);
-    });
+  const byUnit = {};
+  vocabUnits.forEach(u => { byUnit[u.id] = { unit: u, lessons: [] }; });
+  vocabLessons.forEach(l => {
+    if (!byUnit[l.unit_id]) byUnit[l.unit_id] = { unit: { id: l.unit_id, name: "(unit)" }, lessons: [] };
+    byUnit[l.unit_id].lessons.push(l);
   });
-  document.querySelectorAll(".quick-btn").forEach(btn=>{
-    btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
-  });
+  const orderedUnits = vocabUnits.slice().sort((a,b) => (a.position||0) - (b.position||0));
 
-  const lt = document.getElementById("listToggle");
-  const list = document.getElementById("allChaptersList");
-  if (lt && list) {
-    lt.addEventListener("click", ()=>{
-      const open = list.style.display !== "none";
-      list.style.display = open ? "none" : "block";
-      lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
-    });
-    document.querySelectorAll("[data-goto]").forEach(row=>{
-      row.addEventListener("click", ()=>{
-        const id = row.dataset.goto;
-        if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
-        if (isMastered(id)) { 
-          showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section on the home screen.", "Open Menu → 🏆 Mastered chapters to practice it."); 
-          return; 
-        }
-        currentChapterId = id;
-        saveCurrentChapter();
-        renderHome();
+  let unitBlocks = orderedUnits.map(u => {
+    const group = byUnit[u.id];
+    if (!group || group.lessons.length === 0) return "";
+    const lessonRows = group.lessons.map(l => {
+      const cards = vocabCardsByLesson[l.id] || [];
+      const mastered = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) >= MAX_BOX).length;
+      return `<div class="chapter-row" data-vlesson="${l.id}">
+        <div class="chapter-tab" style="background: var(--blue);">${l.position + 1}</div>
+        <div class="chapter-body">
+          <div class="chapter-head">
+            <div>
+              <div class="cname">${l.name}</div>
+              <div class="ccount">${cards.length} words · ${mastered} mastered</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="status-badge ${mastered === cards.length && cards.length > 0 ? "status-mastered" : "status-none"}">${mastered === cards.length && cards.length > 0 ? "Mastered" : "Study"}</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div style="margin-bottom:18px;">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px;">${u.name}</div>
+      ${lessonRows}
+    </div>`;
+  }).join("");
+
+  return unitBlocks || '<div class="empty"><p>No lessons yet.</p></div>';
+}
+
+function renderHome(){
+  screen = "home"; activeChapterId = null;
+  showTopbar(true);
+  pushActivity(null, null);
+  const app = document.getElementById("app");
+  updateStreakBadge();
+  updateUserLine();
+  detectDemotions();
+
+  const tabHtml = `
+    <div class="home-tabs">
+      <button class="home-tab ${currentTab === "kanji" ? "active" : ""}" id="tabKanji">Kanji</button>
+      <button class="home-tab ${currentTab === "kotoba" ? "active" : ""}" id="tabKotoba">Kotoba</button>
+    </div>
+  `;
+
+  const contentHtml = currentTab === "kanji" ? renderKanjiHome() : renderKotobaHomeTab();
+
+  app.innerHTML = tabHtml + contentHtml;
+
+  document.getElementById("tabKanji").addEventListener("click", () => { currentTab = "kanji"; renderHome(); });
+  document.getElementById("tabKotoba").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
+
+  if (currentTab === "kanji") {
+    if (chapters.length > 0) {
+      wireFocusSlider();
+      const visibleIds = settings.studyMode === "guided"
+        ? chapters.filter(c => isUnlocked(c.id) && !isMastered(c.id)).map(c => c.id)
+        : chapters.filter(c => !isMastered(c.id)).map(c => c.id);
+      if (visibleIds.length > 0) wireCarousel(visibleIds);
+    }
+
+    const fb = document.getElementById("firstImport");
+    if (fb) fb.addEventListener("click", ()=> document.getElementById("importFile").click());
+
+    const reviewBtn = document.getElementById("reviewBtn");
+    if (reviewBtn) reviewBtn.addEventListener("click", startGlobalReview);
+
+    const masteredBtn = document.getElementById("masteredBtn");
+    if (masteredBtn) masteredBtn.addEventListener("click", renderCollection);
+
+    document.querySelectorAll("[data-mode]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const ch = btn.dataset.ch, mode = btn.dataset.mode;
+        if (mode==="browse") startBrowse(ch);
+        else if (mode==="learn") startLearn(ch);
       });
     });
-  }
+    document.querySelectorAll(".quick-btn").forEach(btn=>{
+      btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
+    });
 
-  renderPresenceStrip();
+    const lt = document.getElementById("listToggle");
+    const list = document.getElementById("allChaptersList");
+    if (lt && list) {
+      lt.addEventListener("click", ()=>{
+        const open = list.style.display !== "none";
+        list.style.display = open ? "none" : "block";
+        lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
+      });
+      document.querySelectorAll("[data-goto]").forEach(row=>{
+        row.addEventListener("click", ()=>{
+          const id = row.dataset.goto;
+          if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
+          if (isMastered(id)) { 
+            showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section on the home screen.", "Open Menu → 🏆 Mastered chapters to practice it."); 
+            return; 
+          }
+          currentChapterId = id;
+          saveCurrentChapter();
+          renderHome();
+        });
+      });
+    }
+    renderPresenceStrip();
+  } else {
+    // Kotoba Tab wiring
+    const fi = document.getElementById("firstImportVocab");
+    if (fi) fi.addEventListener("click", renderKotobaImport);
+    document.querySelectorAll("[data-vlesson]").forEach(row => {
+      row.addEventListener("click", () => renderKotobaLessonPicker(Number(row.dataset.vlesson)));
+    });
+  }
 }
 function backHome(){ pushActivity(null, null); renderHome(); }
 
@@ -2979,71 +3028,7 @@ document.addEventListener("keydown", (e)=>{
   else if (e.key === "Escape") { browseView = "grid"; renderBrowse(); }
 });
 
-/* ================= KOTOBA ================= */
-
-function renderKotobaHome(){
-  screen = "kotoba";
-  showTopbar(true);
-  const app = document.getElementById("app");
-
-  if (!vocabLessons.length) {
-    app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Kotoba</span></div>
-      <div class="card"><div class="empty"><div class="big">📖</div>
-      <div style="font-size:16px;font-weight:700;">No vocab yet</div>
-      <p>${isAdmin() ? 'Open the ☰ menu → "Import kotoba" to add your first lesson.' : "Ask Tobi to import some vocab."}</p></div></div>
-      ${isAdmin() ? '<button class="small-btn" id="firstImportVocab">Import kotoba</button>' : ""}`;
-    document.getElementById("backBtn").addEventListener("click", renderHome);
-    const fi = document.getElementById("firstImportVocab");
-    if (fi) fi.addEventListener("click", renderKotobaImport);
-    return;
-  }
-
-  const byUnit = {};
-  vocabUnits.forEach(u => { byUnit[u.id] = { unit: u, lessons: [] }; });
-  vocabLessons.forEach(l => {
-    if (!byUnit[l.unit_id]) byUnit[l.unit_id] = { unit: { id: l.unit_id, name: "(unit)" }, lessons: [] };
-    byUnit[l.unit_id].lessons.push(l);
-  });
-  const orderedUnits = vocabUnits.slice().sort((a,b) => (a.position||0) - (b.position||0));
-
-  let unitBlocks = orderedUnits.map(u => {
-    const group = byUnit[u.id];
-    if (!group || group.lessons.length === 0) return "";
-    const lessonRows = group.lessons.map(l => {
-      const cards = vocabCardsByLesson[l.id] || [];
-      const mastered = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) >= MAX_BOX).length;
-      return `<div class="chapter-row" data-vlesson="${l.id}">
-        <div class="chapter-tab" style="background: var(--blue);">${l.position + 1}</div>
-        <div class="chapter-body">
-          <div class="chapter-head">
-            <div>
-              <div class="cname">${l.name}</div>
-              <div class="ccount">${cards.length} words · ${mastered} mastered</div>
-            </div>
-            <div style="text-align:right;">
-              <span class="status-badge ${mastered === cards.length && cards.length > 0 ? "status-mastered" : "status-none"}">${mastered === cards.length && cards.length > 0 ? "Mastered" : "Study"}</span>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join("");
-    return `<div style="margin-bottom:18px;">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px;">${u.name}</div>
-      ${lessonRows}
-    </div>`;
-  }).join("");
-
-  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Kotoba</span></div>
-    <div class="panel" style="margin-bottom:16px;">
-      <div style="font-size:13px;color:var(--muted);line-height:1.6;">Vocabulary flashcards. Tap a lesson to study or browse.</div>
-    </div>
-    ${unitBlocks || '<div class="empty"><p>No lessons yet.</p></div>'}`;
-
-  document.getElementById("backBtn").addEventListener("click", renderHome);
-  document.querySelectorAll("[data-vlesson]").forEach(row => {
-    row.addEventListener("click", () => renderKotobaLessonPicker(Number(row.dataset.vlesson)));
-  });
-}
+/* ================= KOTOBA SCREENS ================= */
 
 function renderKotobaLessonPicker(lessonId){
   const lesson = vocabLessons.find(l => l.id === lessonId);
@@ -3054,9 +3039,10 @@ function renderKotobaLessonPicker(lessonId){
   const app = document.getElementById("app");
   const cards = vocabCardsByLesson[lessonId] || [];
   const learned = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) > 0).length;
+  
   app.innerHTML = `
     <div class="backrow"><button id="backBtn">← kotoba</button><span class="screen-title">${lesson.name}</span></div>
-    <div class="picker-row">
+    <div class="picker-row" style="grid-template-columns: 1fr 1fr;">
       <div class="picker-card" id="pickVocabQuick">
         <div class="pc-icon">⚡</div>
         <div class="pc-title">Quick Session</div>
@@ -3069,7 +3055,7 @@ function renderKotobaLessonPicker(lessonId){
       </div>
     </div>
   `;
-  document.getElementById("backBtn").addEventListener("click", renderKotobaHome);
+  document.getElementById("backBtn").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
   document.getElementById("pickVocabQuick").addEventListener("click", () => startVocabQuick(lessonId));
   document.getElementById("pickVocabBrowse").addEventListener("click", () => renderKotobaBrowse(lessonId));
 }
@@ -3142,8 +3128,8 @@ function renderVocabQuick(){
       </div></div>
       <button class="small-btn" id="again">Run again</button>
       <button class="small-btn ghost" id="backHome">← kotoba</button>`;
-    document.getElementById("backBtn").addEventListener("click", renderKotobaHome);
-    document.getElementById("backHome").addEventListener("click", renderKotobaHome);
+    document.getElementById("backBtn").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
+    document.getElementById("backHome").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
     document.getElementById("again").addEventListener("click", () => startVocabQuick(vocabQuickLessonId));
     syncNow();
     return;
@@ -3168,7 +3154,7 @@ function renderVocabQuick(){
     </div>
     <div id="gradeArea"></div>
   `;
-  document.getElementById("backBtn").addEventListener("click", () => { syncNow(); renderKotobaHome(); });
+  document.getElementById("backBtn").addEventListener("click", () => { syncNow(); currentTab = "kotoba"; renderHome(); });
   document.getElementById("tapzone").addEventListener("click", () => {
     markCardSeen(vocabKey(c.id));
     const backHtml = isMeaningKind
@@ -3262,7 +3248,8 @@ function renderKotobaImport(){
     if (!r.ok) { toast(r.body?.error || "Import failed"); return; }
     toast(`Imported ${r.body.cards_added} cards into "${data.lesson}"`);
     await pullVocab();
-    renderKotobaHome();
+    currentTab = "kotoba";
+    renderHome();
   });
 }
 
