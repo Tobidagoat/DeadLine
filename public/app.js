@@ -897,7 +897,7 @@ async function fetchPresence(){
     const r = await api("/api/presence");
     if (r.ok && r.body && r.body.users) {
       presenceUsers = r.body.users;
-      if (screen === "home" && currentTab === "kanji") renderPresenceStrip();
+      if (screen === "home") renderPresenceStrip();
     }
   } catch(e) {}
 }
@@ -919,7 +919,7 @@ async function pushActivity(chapterId, activity){
         method: "POST",
         body: JSON.stringify({ chapter_id: serverChId, activity: currentActivityKind })
       });
-      if (screen === "home" && currentTab === "kanji") fetchPresence();
+      if (screen === "home") fetchPresence();
     } catch(e) {}
   }, 150);
 }
@@ -2017,6 +2017,7 @@ function wireCarousel(chapterIds){
 }
 
 function renderKanjiHome(){
+  let html = "";
 
   if (chapters.length === 0) {
     html += `<div class="card" style="margin-bottom:16px;"><div class="empty"><div class="big">📥</div>
@@ -2070,7 +2071,8 @@ function renderKanjiHome(){
       <div class="ac-hint">Chapters you've fully locked in. They stay here, safe. You can always come back to review them.</div>
     </div>`;
   }
-    html += `<div class="list-toggle" id="listToggle">▾ All kanji chapters (${chapters.length})</div>`;
+
+  html += `<div class="list-toggle" id="listToggle">▾ All kanji chapters (${chapters.length})</div>`;
   html += `<div class="list-hint">Tap to see every chapter and its progress</div>`;
   html += `<div id="allChaptersList" style="display:none;">`;
   chapters.forEach((ch, idx)=>{
@@ -2117,7 +2119,7 @@ function renderKotobaHomeTab(){
     const group = byUnit[u.id];
     if (!group || group.lessons.length === 0) return;
     
-    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px;">${u.name}</div>`;
+    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px; margin-top:16px;">${u.name}</div>`;
     
     const cardsHtml = group.lessons.map(l => renderKotobaCard(l)).join("");
     html += `<div class="card-grid" style="grid-template-columns: 1fr; gap:16px; margin-bottom:24px;">${cardsHtml}</div>`;
@@ -2135,7 +2137,7 @@ function renderHome(){
   updateUserLine();
   detectDemotions();
 
-  const tabHtml = `
+  const topHtml = `
     <div id="presenceStrip"></div>
     ${renderFocusSlider()}
     ${renderDailyGoal()}
@@ -2147,15 +2149,16 @@ function renderHome(){
 
   const contentHtml = currentTab === "kanji" ? renderKanjiHome() : renderKotobaHomeTab();
 
-  app.innerHTML = tabHtml + contentHtml;
-    renderPresenceStrip();
+  app.innerHTML = topHtml + contentHtml;
+
+  wireFocusSlider();
+  renderPresenceStrip();
 
   document.getElementById("tabKanji").addEventListener("click", () => { currentTab = "kanji"; renderHome(); });
   document.getElementById("tabKotoba").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
 
   if (currentTab === "kanji") {
     if (chapters.length > 0) {
-      wireFocusSlider();
       const visibleIds = settings.studyMode === "guided"
         ? chapters.filter(c => isUnlocked(c.id) && !isMastered(c.id)).map(c => c.id)
         : chapters.filter(c => !isMastered(c.id)).map(c => c.id);
@@ -2163,28 +2166,6 @@ function renderHome(){
     }
 
     const fb = document.getElementById("firstImport");
-      const lt = document.getElementById("listToggle");
-  const list = document.getElementById("allChaptersList");
-  if (lt && list) {
-    lt.addEventListener("click", ()=>{
-      const open = list.style.display !== "none";
-      list.style.display = open ? "none" : "block";
-      lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
-    });
-    document.querySelectorAll("[data-goto]").forEach(row=>{
-      row.addEventListener("click", ()=>{
-        const id = row.dataset.goto;
-        if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
-        if (isMastered(id)) { 
-          showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section.", "Open Menu → 🏆 Mastered chapters to practice it."); 
-          return; 
-        }
-        currentChapterId = id;
-        saveCurrentChapter();
-        renderHome();
-      });
-    });
-  }
     if (fb) fb.addEventListener("click", ()=> document.getElementById("importFile").click());
 
     const reviewBtn = document.getElementById("reviewBtn");
@@ -2200,10 +2181,32 @@ function renderHome(){
         else if (mode==="learn") startLearn(ch);
       });
     });
-    document.querySelectorAll(".quick-btn").forEach(btn=>{
+    document.querySelectorAll(".quick-btn[data-ch]").forEach(btn=>{
       btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
     });
-    renderPresenceStrip();
+
+    const lt = document.getElementById("listToggle");
+    const list = document.getElementById("allChaptersList");
+    if (lt && list) {
+      lt.addEventListener("click", ()=>{
+        const open = list.style.display !== "none";
+        list.style.display = open ? "none" : "block";
+        lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
+      });
+      document.querySelectorAll("[data-goto]").forEach(row=>{
+        row.addEventListener("click", ()=>{
+          const id = row.dataset.goto;
+          if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
+          if (isMastered(id)) { 
+            showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section.", "Open Menu → 🏆 Mastered chapters to practice it."); 
+            return; 
+          }
+          currentChapterId = id;
+          saveCurrentChapter();
+          renderHome();
+        });
+      });
+    }
   } else {
     // Kotoba Tab wiring
     const fi = document.getElementById("firstImportVocab");
@@ -2917,7 +2920,7 @@ function renderManageKotoba(){
       <div class="manage-row" style="background:var(--bg); border:none; font-weight:700;">
         <span class="rname">${u.name}</span>
         <div class="manage-actions">
-                    <button class="link-btn2" data-vunitrename="${u.id}">rename unit</button>
+          <button class="link-btn2" data-vunitrename="${u.id}">rename unit</button>
           <button class="del-btn" data-vunitdel="${u.id}">delete unit</button>
         </div>
       </div>
@@ -2933,23 +2936,7 @@ function renderManageKotoba(){
   
   document.getElementById("backBtn").addEventListener("click", renderHome);
   document.getElementById("importFromKotobaPanel").addEventListener("click", renderKotobaImport);
-    document.querySelectorAll("[data-vunitrename]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const unit = vocabUnits.find(u => u.id === Number(btn.dataset.vunitrename));
-      if (!unit) return;
-      const newName = prompt("Rename unit:", unit.name);
-      if (newName === null) return;
-      const trimmed = newName.trim();
-      if (!trimmed || trimmed === unit.name) return;
-      
-      const r = await api("/api/vocab/units/" + unit.id, {
-        method: "PATCH", body: JSON.stringify({ name: trimmed })
-      });
-      if (!r.ok) { toast("Rename failed"); return; }
-      await pullVocab();
-      renderManageKotoba();
-    });
-  });
+  
   document.querySelectorAll("[data-vunitdel]").forEach(btn => {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this entire unit and all its lessons?")) return;
@@ -2979,9 +2966,25 @@ function renderManageKotoba(){
       const trimmed = newName.trim();
       if (!trimmed || trimmed === lesson.name) return;
       
-      // Since we don't have a PATCH endpoint for vocab yet, we'll skip the actual rename call for now and just mock it
-      // Or ideally, we should add a PATCH /api/vocab/lessons/:id endpoint. I will add the endpoint in the next server update.
       const r = await api("/api/vocab/lessons/" + lesson.id, {
+        method: "PATCH", body: JSON.stringify({ name: trimmed })
+      });
+      if (!r.ok) { toast("Rename failed"); return; }
+      await pullVocab();
+      renderManageKotoba();
+    });
+  });
+
+  document.querySelectorAll("[data-vunitrename]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const unit = vocabUnits.find(u => u.id === Number(btn.dataset.vunitrename));
+      if (!unit) return;
+      const newName = prompt("Rename unit:", unit.name);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === unit.name) return;
+      
+      const r = await api("/api/vocab/units/" + unit.id, {
         method: "PATCH", body: JSON.stringify({ name: trimmed })
       });
       if (!r.ok) { toast("Rename failed"); return; }
@@ -3279,7 +3282,10 @@ function renderVocabQuick(){
   `;
   document.getElementById("backBtn").addEventListener("click", () => { syncNow(); currentTab = "kotoba"; renderHome(); });
   document.getElementById("tapzone").addEventListener("click", () => {
-        const backHtml = isMeaningKind
+    markCardSeen(vocabKey(c.id));
+    
+    // The Kana fix you requested!
+    const backHtml = isMeaningKind
       ? `<div class="reading" style="font-size: 26px; margin-bottom: 8px;">${c.def_ja || c.meaning}</div>
          ${c.def_ja ? `<div class="meaning" style="font-size: 16px; color: var(--muted); margin-bottom: 12px;">${c.meaning}</div>` : ""}
          <div class="reading" style="font-size: 22px; margin-bottom: 0;">${c.kana}</div>
@@ -3288,6 +3294,7 @@ function renderVocabQuick(){
       : `<div class="reading">${c.kana}</div>
          <div class="meaning">${c.meaning}</div>
          ${c.sentence ? `<div class="sentence">${c.sentence}</div>` : ""}`;
+         
     document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">${backHtml}</div>`;
     document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
       <button class="g-wrong" id="markWrong">✗ Wrong</button>
