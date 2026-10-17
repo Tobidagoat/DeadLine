@@ -2017,7 +2017,6 @@ function wireCarousel(chapterIds){
 }
 
 function renderKanjiHome(){
-  let html = `<div id="presenceStrip"></div>`;
 
   if (chapters.length === 0) {
     html += `<div class="card" style="margin-bottom:16px;"><div class="empty"><div class="big">📥</div>
@@ -2071,6 +2070,29 @@ function renderKanjiHome(){
       <div class="ac-hint">Chapters you've fully locked in. They stay here, safe. You can always come back to review them.</div>
     </div>`;
   }
+    html += `<div class="list-toggle" id="listToggle">▾ All kanji chapters (${chapters.length})</div>`;
+  html += `<div class="list-hint">Tap to see every chapter and its progress</div>`;
+  html += `<div id="allChaptersList" style="display:none;">`;
+  chapters.forEach((ch, idx)=>{
+    const st = chapterStatus(ch.id);
+    const unlocked = isUnlocked(ch.id);
+    const lockedCls = unlocked ? "" : " locked";
+    const tabCls = st.key === "mastered" ? "chapter-tab mastered" : (unlocked ? "chapter-tab" : "chapter-tab locked");
+    const m = chapterMastery(ch.id);
+    const displayName = cleanChapterName(ch.name);
+    html += `<div class="chapter-row${lockedCls}" data-goto="${ch.id}">
+      <div class="${tabCls}">${idx+1}</div>
+      <div class="chapter-body">
+        <div class="chapter-head">
+          <div><div class="cname">${displayName}</div><div class="ccount">${ch.cards.length} verbs · ${m.box3}/${m.total} mastered</div></div>
+          <div style="text-align:right;">
+            <span class="status-badge ${st.cls}">${unlocked ? st.label : "Locked"}</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  });
+  html += `</div>`;
   return html;
 }
 
@@ -2114,6 +2136,7 @@ function renderHome(){
   detectDemotions();
 
   const tabHtml = `
+    <div id="presenceStrip"></div>
     ${renderFocusSlider()}
     ${renderDailyGoal()}
     <div class="home-tabs" style="margin-top: 16px;">
@@ -2125,6 +2148,7 @@ function renderHome(){
   const contentHtml = currentTab === "kanji" ? renderKanjiHome() : renderKotobaHomeTab();
 
   app.innerHTML = tabHtml + contentHtml;
+    renderPresenceStrip();
 
   document.getElementById("tabKanji").addEventListener("click", () => { currentTab = "kanji"; renderHome(); });
   document.getElementById("tabKotoba").addEventListener("click", () => { currentTab = "kotoba"; renderHome(); });
@@ -2139,6 +2163,28 @@ function renderHome(){
     }
 
     const fb = document.getElementById("firstImport");
+      const lt = document.getElementById("listToggle");
+  const list = document.getElementById("allChaptersList");
+  if (lt && list) {
+    lt.addEventListener("click", ()=>{
+      const open = list.style.display !== "none";
+      list.style.display = open ? "none" : "block";
+      lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
+    });
+    document.querySelectorAll("[data-goto]").forEach(row=>{
+      row.addEventListener("click", ()=>{
+        const id = row.dataset.goto;
+        if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
+        if (isMastered(id)) { 
+          showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section.", "Open Menu → 🏆 Mastered chapters to practice it."); 
+          return; 
+        }
+        currentChapterId = id;
+        saveCurrentChapter();
+        renderHome();
+      });
+    });
+  }
     if (fb) fb.addEventListener("click", ()=> document.getElementById("importFile").click());
 
     const reviewBtn = document.getElementById("reviewBtn");
