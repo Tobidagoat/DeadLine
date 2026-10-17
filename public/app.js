@@ -1580,6 +1580,7 @@ function renderMenu(){
       <div class="menu-item" id="m-notifs" style="padding:14px 16px;">🔔 Notifications</div>
       <div class="menu-item" id="m-collection" style="padding:14px 16px;">🏆 Mastered chapters</div>
       <div class="menu-item" id="m-leaderboard" style="padding:14px 16px;">🏅 Leaderboard</div>
+      <div class="menu-item" id="m-invite" style="padding:14px 16px;">🔗 Share App with Classmates</div>
       ${authUser.is_admin ? `
       <div class="menu-item" id="m-import" style="padding:14px 16px;">📥 Import chapter</div>
       <div class="menu-item" id="m-manage" style="padding:14px 16px;">📂 Manage chapters</div>
@@ -1597,6 +1598,16 @@ function renderMenu(){
   document.getElementById("m-notifs").addEventListener("click", renderNotificationsScreen);
   document.getElementById("m-collection").addEventListener("click", renderCollection);
   document.getElementById("m-leaderboard").addEventListener("click", renderLeaderboard);
+  
+  document.getElementById("m-invite").addEventListener("click", () => {
+    const url = window.location.origin;
+    navigator.clipboard.writeText(url).then(() => {
+      toast("Link copied! Send it to your classmates.");
+    }).catch(() => {
+      showDialog("Share the app", "Copy this link and send it to your classmates:<br><br><b>" + url + "</b>");
+    });
+  });
+
   const importBtn = document.getElementById("m-import");
   if (importBtn) importBtn.addEventListener("click", ()=> document.getElementById("importFile").click());
   const manageBtn = document.getElementById("m-manage");
@@ -2293,3 +2304,596 @@ function undoAnswer() {
   renderQuick();
   saveLocalProgress();
 }
+
+async function recordQuickSession(){
+  const chapterId = quickChapterId;
+  if (!chapterId) return;
+  const missedCards = Object.keys(quickMiss).filter(k=>quickMiss[k]>0).length;
+  const accuracy = quickTotal ? Math.round(100*(quickTotal-missedCards)/quickTotal) : 100;
+  const st = quickStats[chapterId] || { sessions: 0, lastAccuracy: null, bestAccuracy: null, lastPlayedAt: null };
+  st.sessions += 1;
+  st.lastAccuracy = accuracy;
+  st.bestAccuracy = st.bestAccuracy === null ? accuracy : Math.max(st.bestAccuracy, accuracy);
+  st.lastPlayedAt = new Date().toISOString();
+  quickStats[chapterId] = st;
+  await saveQuickStats();
+}
+
+/* ================= BROWSE ================= */
+let browseList = [], browseIdx = 0, browseFlagged = new Set(), browseView = "grid", browseShowFlaggedOnly = false;
+
+function startBrowse(chapterId){
+  screen = "browse"; activeChapterId = chapterId;
+  showTopbar(true);
+  pushActivity(chapterId, "browse");
+  browseList = orderCards(chapterCards(chapterId).map(v=>v.id));
+  browseFlagged = new Set();
+  browseView = "grid"; browseShowFlaggedOnly = false;
+  renderBrowse();
+}
+function renderBrowse(){ if (browseView === "grid") renderBrowseGrid(); else renderBrowseCard(); }
+function renderBrowseGrid(){
+  const app = document.getElementById("app");
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
+  const idsToShow = browseShowFlaggedOnly ? browseList.filter(id=>browseFlagged.has(id)) : browseList;
+  const tiles = idsToShow.map(id=>{
+    const v = findVocab(id);
+    const p = progress[id] || { box: 0 };
+    const box = p.box;
+    const flaggedCls = browseFlagged.has(id) ? " flagged" : "";
+    const boxBadge = box >= MAX_BOX ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--green);font-weight:700;">L3</div>` :
+                     box >= 2 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--blue);font-weight:700;">L2</div>` :
+                     box >= 1 ? `<div style="position:absolute;top:6px;left:8px;font-size:10px;color:var(--amber);font-weight:700;">L1</div>` : "";
+    return `<div class="grid-tile${flaggedCls}" data-id="${id}">
+      ${browseFlagged.has(id) ? '<span class="tile-star">★</span>' : ''}
+      ${boxBadge}
+      <div class="tile-kanji">${v.k}</div>
+      <div class="tile-reading">${v.r}</div>
+      <div class="tile-meaning">${v.m}</div>
+    </div>`;
+  }).join("");
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Browse · ${chName}</span></div>
+    <div class="session-progress">
+      <span>${idsToShow.length} card${idsToShow.length===1?'':'s'}</span>
+      <span>${browseFlagged.size ? '<button class="link-mini" id="toggleFlagged">' + (browseShowFlaggedOnly ? 'show all' : '★ ' + browseFlagged.size + ' flagged') + '</button>' : ''}</span>
+    </div>
+    <div class="card-grid">${tiles || '<div class="empty" style="grid-column:1/-1;"><p>No flagged cards.</p></div>'}</div>
+  `;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  const tf = document.getElementById("toggleFlagged");
+  if (tf) tf.addEventListener("click", ()=>{ browseShowFlaggedOnly = !browseShowFlaggedOnly; renderBrowseGrid(); });
+  document.querySelectorAll(".grid-tile").forEach(tile=>{
+    tile.addEventListener("click", ()=>{
+      browseIdx = browseList.indexOf(tile.dataset.id);
+      browseView = "card";
+      renderBrowse();
+    });
+  });
+}
+function renderBrowseCard(){
+  const app = document.getElementById("app");
+  const v = findVocab(browseList[browseIdx]);
+  const isFlagged = browseFlagged.has(v.id);
+  const p = progress[v.id] || { box: 0 };
+  app.innerHTML = `
+    <div class="backrow"><button id="gridBtn">← all cards</button><span class="screen-title">${browseIdx+1} / ${browseList.length}</span></div>
+    <div class="browse-nav">
+      <button class="nav-arrow" id="prevBtn" ${browseIdx===0?"disabled":""}>‹</button>
+      <div class="card" id="tapzone">
+        <button class="star-toggle ${isFlagged?"on":""}" id="starBtn" title="Flag for redo">★</button>
+        <div class="chaptertag">${cleanChapterName(v.chapterName)} · level ${p.box}</div>
+        <div class="kanji">${v.k}</div>
+        <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+        <div class="meaning">${v.m}</div>
+        <div class="sentence">${v.s}</div>
+      </div>
+      <button class="nav-arrow" id="nextBtn" ${browseIdx===browseList.length-1?"disabled":""}>›</button>
+    </div>
+  `;
+  document.getElementById("gridBtn").addEventListener("click", ()=>{ browseView="grid"; renderBrowse(); });
+  document.getElementById("starBtn").addEventListener("click", (e)=>{
+    e.stopPropagation();
+    if (browseFlagged.has(v.id)) browseFlagged.delete(v.id); else browseFlagged.add(v.id);
+    renderBrowseCard();
+  });
+  const prevBtn = document.getElementById("prevBtn");
+  const nextBtn = document.getElementById("nextBtn");
+  if (!prevBtn.disabled) prevBtn.addEventListener("click", ()=>{ browseIdx--; renderBrowseCard(); });
+  if (!nextBtn.disabled) nextBtn.addEventListener("click", ()=>{ browseIdx++; renderBrowseCard(); });
+}
+
+/* ================= LEARN ================= */
+let learnBatches = [], learnBatchIdx = 0, learnPhase = "study";
+let learnTestQueue = [], learnTestTotal = 0, learnTestMiss = {}, learnMastered = [];
+
+function chunkArr(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+
+function startLearn(chapterId){
+  screen = "learn"; activeChapterId = chapterId;
+  showTopbar(true);
+  pushActivity(chapterId, "learn");
+  const ids = orderCards(chapterCards(chapterId).map(v=>v.id));
+  const size = Math.max(3, Math.min(10, settings.learnBatchSize || 6));
+  learnBatches = chunkArr(ids, size);
+  learnBatchIdx = 0;
+  learnMastered = [];
+  enterLearnStudy();
+}
+function enterLearnStudy(){ learnPhase = "study"; renderLearn(); }
+function enterLearnTest(){
+  learnPhase = "test";
+  const newWords = learnBatches[learnBatchIdx];
+  const pool = settings.learnCumulative !== false ? [...newWords, ...learnMastered] : newWords.slice();
+  learnTestQueue = orderCards(pool);
+  learnTestTotal = learnTestQueue.length;
+  learnTestMiss = {};
+  renderLearn();
+}
+function renderLearn(){
+  if (learnPhase === "study") renderLearnStudy();
+  else if (learnPhase === "test") renderLearnTest();
+  else if (learnPhase === "batchdone") renderLearnBatchDone();
+  else renderLearnChapterDone();
+}
+function renderLearnStudy(){
+  const app = document.getElementById("app");
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
+  const batch = learnBatches[learnBatchIdx];
+  const items = batch.map(id=>{
+    const v = findVocab(id);
+    return `<div class="learn-item">
+      <div class="learn-item-head"><span class="learn-kanji">${v.k}</span><span class="learn-reading">${v.r}</span></div>
+      <div class="learn-meaning">${v.m}</div>
+      <div class="learn-sentence">${v.s}</div>
+    </div>`;
+  }).join("");
+  const retestNote = (settings.learnCumulative !== false && learnMastered.length)
+    ? `<div style="margin-bottom:10px;font-size:11px;color:var(--muted);">The test will also re-check ${learnMastered.length} word${learnMastered.length>1?'s':''} from earlier batches.</div>`
+    : "";
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Learn · ${chName}</span></div>
+    <div class="session-progress"><span>Batch ${learnBatchIdx+1} of ${learnBatches.length}</span><span>${batch.length} new words</span></div>
+    <div class="learn-list">${items}</div>
+    ${retestNote}
+    <button class="small-btn" id="testMeBtn">Test me on these ${batch.length} words</button>
+  `;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  document.getElementById("testMeBtn").addEventListener("click", enterLearnTest);
+}
+function renderLearnTest(){
+  const app = document.getElementById("app");
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
+  if (!learnTestQueue.length) {
+    learnMastered.push(...learnBatches[learnBatchIdx]);
+    if (learnBatchIdx < learnBatches.length - 1) learnPhase = "batchdone";
+    else learnPhase = "chapterdone";
+    renderLearn();
+    return;
+  }
+  const doneCount = learnTestTotal - new Set(learnTestQueue).size;
+  const v = findVocab(learnTestQueue[0]);
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Learn · ${chName}</span></div>
+    <div class="session-progress"><span>Batch ${learnBatchIdx+1} of ${learnBatches.length}</span><span>${doneCount} / ${learnTestTotal} got it</span></div>
+    <div class="progressbar"><div style="width:${Math.round((doneCount/learnTestTotal)*100)}%"></div></div>
+    <div class="card tapzone" id="tapzone">
+      <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
+      <div class="kanji">${v.k}</div>
+      <div class="reveal-hint" id="hint">tap to reveal reading &amp; meaning</div>
+    </div>
+    <div id="gradeArea"></div>
+  `;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  document.getElementById("tapzone").addEventListener("click", ()=>{
+    document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
+      <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+      <div class="meaning">${v.m}</div>
+    </div>`;
+    document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
+      <button class="g-wrong" id="markWrong">✗ Wrong</button>
+      <button class="g-right" id="markRight">✓ Correct</button>
+    </div>`;
+    document.getElementById("markRight").addEventListener("click", ()=> learnAnswer(true));
+    document.getElementById("markWrong").addEventListener("click", ()=> learnAnswer(false));
+  });
+}
+async function learnAnswer(correct){
+  const id = learnTestQueue.shift();
+  markCardSeen(id);
+  await recordStreakToday();
+  applyAnswer(id, correct);
+  if (!correct) {
+    learnTestMiss[id] = (learnTestMiss[id]||0) + 1;
+    await recordMiss(id);
+    const gap = Math.max(1, settings.requeueGap);
+    const pos = Math.min(learnTestQueue.length, gap);
+    learnTestQueue.splice(pos, 0, id);
+  }
+  await saveLocalProgress();
+  syncNow();
+  renderLearnTest();
+}
+function renderLearnBatchDone(){
+  const app = document.getElementById("app");
+  const missed = Object.keys(learnTestMiss).length;
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Learn</span></div>
+    <div class="card"><div class="empty"><div class="big">✅</div>
+    <div style="font-size:16px;font-weight:700;">Batch ${learnBatchIdx+1} down!</div>
+    <p>${missed ? missed + " word" + (missed>1?"s":"") + " needed a couple tries." : "Clean run — nice."}</p></div></div>
+    <button class="small-btn" id="nextBatch">Next ${learnBatches[learnBatchIdx+1].length} words →</button>`;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  document.getElementById("nextBatch").addEventListener("click", ()=>{ learnBatchIdx++; enterLearnStudy(); });
+}
+function renderLearnChapterDone(){
+  const app = document.getElementById("app");
+  const chName = cleanChapterName(chapterById(activeChapterId).name);
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Learn</span></div>
+    <div class="card"><div class="empty"><div class="big">🎉</div>
+    <div style="font-size:16px;font-weight:700;">All of ${chName} learned!</div>
+    <p>${learnBatches.length} batches, ${learnBatches.flat().length} words.</p></div></div>
+    <button class="small-btn" id="restartLearn">Go through it again</button>`;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  document.getElementById("restartLearn").addEventListener("click", ()=> startLearn(activeChapterId));
+}
+
+/* ================= GLOBAL REVIEW ================= */
+let reviewQueue = [], reviewTotal = 0;
+
+function startGlobalReview(){
+  screen = "review"; activeChapterId = null;
+  showTopbar(true);
+  const pool = globalReviewPoolIds();
+  if (!pool.length) { renderGlobalReview(); return; }
+  reviewQueue = orderCards(pool);
+  reviewTotal = reviewQueue.length;
+  renderGlobalReview();
+}
+function renderGlobalReview(){
+  const app = document.getElementById("app");
+  if (!reviewQueue.length) {
+    const still = globalReviewPoolIds().length;
+    app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Review</span></div>
+      <div class="card"><div class="empty"><div class="big">${still ? "🙂" : "✨"}</div>
+      <div style="font-size:16px;font-weight:700;">${still ? "Round complete" : "Nothing to review right now"}</div>
+      <p>${still ? still + " card" + (still>1?"s":"") + " still need more practice — another round?" : "Cards show up here when you miss them, or when they're still below L3."}</p></div></div>
+      ${still ? '<button class="small-btn" id="againBtn">Practice again</button>' : ""}`;
+    document.getElementById("backBtn").addEventListener("click", backHome);
+    const again = document.getElementById("againBtn");
+    if (again) again.addEventListener("click", startGlobalReview);
+    return;
+  }
+  const remaining = new Set(reviewQueue).size;
+  const v = findVocab(reviewQueue[0]);
+  const misses = (weakStats[v.id] && weakStats[v.id].misses) || 0;
+  const box = clampBox(progress[v.id]?.box ?? 0);
+  const metaParts = [];
+  if (misses > 0) metaParts.push(`missed ${misses}×`);
+  metaParts.push(`L${box}`);
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Review</span></div>
+    <div class="session-progress"><span>${reviewTotal - remaining + 1} / ${reviewTotal} this round</span><span>${metaParts.join(" · ")}</span></div>
+    <div class="progressbar"><div style="width:${Math.round(((reviewTotal-remaining)/reviewTotal)*100)}%"></div></div>
+    <div class="card tapzone" id="tapzone">
+      <div class="chaptertag">${cleanChapterName(v.chapterName)}</div>
+      <div class="kanji">${v.k}</div>
+      <div class="reveal-hint" id="hint">tap to reveal reading &amp; meaning</div>
+    </div>
+    <div id="gradeArea"></div>
+  `;
+  document.getElementById("backBtn").addEventListener("click", backHome);
+  document.getElementById("tapzone").addEventListener("click", ()=>{
+    document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
+      <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+      <div class="meaning">${v.m}</div>
+      <div class="sentence">${v.s}</div>
+    </div>`;
+    document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
+      <button class="g-wrong" id="markWrong">✗ Wrong</button>
+      <button class="g-right" id="markRight">✓ Correct</button>
+    </div>`;
+    document.getElementById("markRight").addEventListener("click", ()=> reviewAnswer(true));
+    document.getElementById("markWrong").addEventListener("click", ()=> reviewAnswer(false));
+  });
+}
+async function reviewAnswer(correct){
+  const id = reviewQueue.shift();
+  markCardSeen(id);
+  await recordStreakToday();
+  applyAnswer(id, correct);
+  if (correct) {
+    if (weakStats[id]) {
+      weakStats[id].misses = Math.max(0, weakStats[id].misses - 1);
+      if (weakStats[id].misses === 0) delete weakStats[id];
+      await saveWeakStats();
+    }
+  } else {
+    await recordMiss(id);
+    const gap = Math.max(1, settings.requeueGap);
+    const pos = Math.min(reviewQueue.length, gap);
+    reviewQueue.splice(pos, 0, id);
+  }
+  await saveLocalProgress();
+  syncNow();
+  renderGlobalReview();
+}
+
+/* ================= STATS ================= */
+function renderStatsScreen(){
+  screen = "stats";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  const streak = computeCurrentStreak();
+  const longest = computeLongestStreak();
+  const weakCount = weakPoolIds().length;
+  const masteredCount = chapters.filter(ch => isMastered(ch.id)).length;
+  const DAYS = 84;
+  let cells = "";
+  for (let i = DAYS-1; i>=0; i--){
+    const ds = dateStrOffset(i);
+    const on = !!streakDates[ds];
+    cells += `<div class="heat-cell${on?" on":""}" title="${ds}${on?" · practiced":""}"></div>`;
+  }
+  let chapterRows = chapters.map(ch=>{
+    const st = chapterStatus(ch.id);
+    const m = chapterMastery(ch.id);
+    return `<div class="stat-row">
+      <span class="stat-row-name">${cleanChapterName(ch.name)}</span>
+      <span class="stat-row-val">${st.label} · ${m.box3}/${m.total} at L3</span>
+    </div>`;
+  }).join("");
+  app.innerHTML = `
+    <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Stats &amp; streak</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-around;text-align:center;">
+        <div><div style="font-size:22px;font-weight:700;">🔥 ${streak}</div><div class="ccount">streak</div></div>
+        <div><div style="font-size:22px;font-weight:700;">${longest}</div><div class="ccount">longest</div></div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--green);">${masteredCount}</div><div class="ccount">mastered</div></div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--seal);">${weakCount}</div><div class="ccount">weak</div></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Last ${DAYS} days</div>
+      <div class="heatmap">${cells}</div>
+    </div>
+    <div class="panel">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Progress by chapter</div>
+      ${chapterRows || '<div class="empty"><p>No chapters yet.</p></div>'}
+    </div>
+  `;
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+}
+
+/* ================= MANAGE ================= */
+function renderManage(){
+  screen = "manage";
+  showTopbar(true);
+  if (!isAdmin()) { renderHome(); return; }
+  const app = document.getElementById("app");
+  let rows = chapters.map(ch=>{
+    return `<div class="manage-row">
+      <span class="rname">${cleanChapterName(ch.name)} <span style="color:var(--muted);font-weight:400;">(${ch.cards.length})</span></span>
+      <div class="manage-actions">
+        ${ch.serverId ? `
+          <button class="link-btn2" data-rename="${ch.id}">rename</button>
+          <button class="del-btn" data-del="${ch.id}">delete</button>
+        ` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Manage chapters</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Kanji chapters</div>
+      ${rows || '<div class="hint" style="margin-bottom:6px;">No chapters yet.</div>'}
+      <button class="small-btn" id="importFromPanel">+ import a new chapter</button>
+    </div>`;
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+  document.getElementById("importFromPanel").addEventListener("click", ()=> document.getElementById("importFile").click());
+  document.querySelectorAll("[data-del]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      if (!confirm("Delete this chapter for everyone? This can't be undone.")) return;
+      const id = btn.dataset.del;
+      const ch = chapterById(id);
+      if (!ch || !ch.serverId) return;
+      const r = await api("/api/chapters/" + ch.serverId, { method: "DELETE" });
+      if (!r.ok) { toast(r.body && r.body.error ? r.body.error : "Delete failed"); return; }
+      chapters = chapters.filter(c=>c.id !== id);
+      await saveLocalChapters();
+      rebuildVocab();
+      await saveLocalProgress();
+      toast("Chapter deleted");
+      renderManage();
+    });
+  });
+  document.querySelectorAll("[data-rename]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const id = btn.dataset.rename;
+      const ch = chapterById(id);
+      if (!ch || !ch.serverId) return;
+      const currentName = ch.name;
+      const newName = prompt("Rename chapter:", currentName);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === currentName) return;
+      const r = await api("/api/chapters/" + ch.serverId, {
+        method: "PATCH",
+        body: JSON.stringify({ name: trimmed })
+      });
+      if (!r.ok) { toast(r.body && r.body.error ? r.body.error : "Rename failed"); return; }
+      ch.name = trimmed;
+      await saveLocalChapters();
+      rebuildVocab();
+      toast("Chapter renamed");
+      renderManage();
+    });
+  });
+}
+
+/* ================= SETTINGS ================= */
+function renderSettings(){
+  screen = "settings";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  const guided = settings.studyMode === "guided";
+  const free = settings.studyMode !== "guided";
+  const interOn = settings.interleaving !== false;
+  const interOff = settings.interleaving === false;
+  const soundOn = settings.soundEnabled !== false;
+  const soundOff = settings.soundEnabled === false;
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Settings</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="setting-row">
+        <label>Study mode</label>
+        <div class="seg-control">
+          <button class="seg-btn ${guided ? "active" : ""}" id="modeGuided">Guided<span class="sg-sub">one at a time</span></button>
+          <button class="seg-btn ${free ? "active" : ""}" id="modeFree">Free<span class="sg-sub">all chapters open</span></button>
+        </div>
+        <div class="hint">Guided: home shows one chapter, unlocks as you go. Free: all chapters open.</div>
+      </div>
+      <div class="setting-row">
+        <label>Mix in older cards</label>
+        <div class="seg-control">
+          <button class="seg-btn ${interOn ? "active" : ""}" id="interOn">On</button>
+          <button class="seg-btn ${interOff ? "active" : ""}" id="interOff">Off</button>
+        </div>
+        <div class="hint">Adds ~20% cards from other unfinished chapters into Quick sessions.</div>
+      </div>
+      <div class="setting-row">
+        <label>Notification sounds</label>
+        <div class="seg-control">
+          <button class="seg-btn ${soundOn ? "active" : ""}" id="soundOnBtn">On</button>
+          <button class="seg-btn ${soundOff ? "active" : ""}" id="soundOffBtn">Off</button>
+        </div>
+        <div class="hint">Small chime when you receive a reaction or an invite.</div>
+      </div>
+      <div class="setting-row">
+        <label>Daily goal (cards per day)</label>
+        <div class="unit-input">
+          <input type="number" min="1" id="dailyGoal" value="${settings.dailyGoal || DEFAULT_DAILY_GOAL}">
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="setting-row">
+        <label>Shuffle card order</label>
+        <div class="seg-control">
+          <button class="seg-btn ${settings.shuffle?"active":""}" id="shuffleOnBtn">On</button>
+          <button class="seg-btn ${!settings.shuffle?"active":""}" id="shuffleOffBtn">Off</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>Quick Session redo gap</label>
+        <div class="unit-input">
+          <input type="number" min="1" id="requeueGap" value="${settings.requeueGap}">
+          <span class="hint" style="align-self:center;">cards later</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>Learn mode batch size</label>
+        <div class="unit-input">
+          <input type="number" min="3" max="10" id="learnBatchSize" value="${settings.learnBatchSize}">
+          <span class="hint" style="align-self:center;">new words per batch</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>Retest earlier batches each round</label>
+        <div class="seg-control">
+          <button class="seg-btn ${settings.learnCumulative!==false?"active":""}" id="cumOnBtn">On</button>
+          <button class="seg-btn ${settings.learnCumulative===false?"active":""}" id="cumOffBtn">Off</button>
+        </div>
+      </div>
+      <button class="small-btn" id="saveSettings">Save settings</button>
+      <button class="small-btn ghost" id="resetSettings">Reset to defaults</button>
+    </div>`;
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+  document.getElementById("modeGuided").addEventListener("click", ()=>{ settings.studyMode = "guided"; renderSettings(); });
+  document.getElementById("modeFree").addEventListener("click", ()=>{ settings.studyMode = "free"; renderSettings(); });
+  document.getElementById("interOn").addEventListener("click", ()=>{ settings.interleaving = true; renderSettings(); });
+  document.getElementById("interOff").addEventListener("click", ()=>{ settings.interleaving = false; renderSettings(); });
+  document.getElementById("soundOnBtn").addEventListener("click", ()=>{ settings.soundEnabled = true; renderSettings(); });
+  document.getElementById("soundOffBtn").addEventListener("click", ()=>{ settings.soundEnabled = false; renderSettings(); });
+  document.getElementById("shuffleOnBtn").addEventListener("click", ()=>{ settings.shuffle = true; renderSettings(); });
+  document.getElementById("shuffleOffBtn").addEventListener("click", ()=>{ settings.shuffle = false; renderSettings(); });
+  document.getElementById("cumOnBtn").addEventListener("click", ()=>{ settings.learnCumulative = true; renderSettings(); });
+  document.getElementById("cumOffBtn").addEventListener("click", ()=>{ settings.learnCumulative = false; renderSettings(); });
+  document.getElementById("saveSettings").addEventListener("click", async ()=>{
+    settings.requeueGap = Math.max(1, Number(document.getElementById("requeueGap").value) || 3);
+    settings.learnBatchSize = Math.max(3, Math.min(10, Number(document.getElementById("learnBatchSize").value) || 6));
+    settings.dailyGoal = Math.max(1, Number(document.getElementById("dailyGoal").value) || DEFAULT_DAILY_GOAL);
+    await saveSettings();
+    toast("Settings saved");
+    syncNow();
+    renderHome();
+  });
+  document.getElementById("resetSettings").addEventListener("click", async ()=>{
+    const mode = settings.studyMode;
+    settings = deepClone(DEFAULT_SETTINGS);
+    settings.studyMode = mode;
+    await saveSettings();
+    renderSettings();
+  });
+}
+
+document.getElementById("menuBtn").addEventListener("click", renderMenu);
+document.getElementById("notifBtn").addEventListener("click", renderNotificationsScreen);
+
+document.getElementById("importFile").addEventListener("change", async (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!(data.cards && Array.isArray(data.cards) && data.cards.length)) throw new Error("unrecognized format");
+    const cards = data.cards.map(c => ({
+      k: c.kanji || c.k || "", r: c.reading || c.r || "", m: c.meaning || c.m || "", s: c.sentence || c.s || ""
+    })).filter(c => c.k && c.r);
+    if (!cards.length) throw new Error("no valid cards");
+    const name = data.chapterName || data.name || ("Imported chapter " + (chapters.length + 1));
+    const r = await api("/api/chapters", { method: "POST", body: JSON.stringify({ name, cards }) });
+    if (r.ok) {
+      const detail = await api("/api/chapters/" + r.body.id);
+      if (detail.ok) {
+        chapters.push({
+          id: "srv_" + r.body.id, serverId: r.body.id, name: detail.body.chapter.name,
+          cards: detail.body.cards.map(c => ({ serverId: c.id, k: c.kanji, r: c.reading, m: c.meaning, s: c.sentence || "" }))
+        });
+        sortChapters();
+        await saveLocalChapters();
+        rebuildVocab();
+        await saveLocalProgress();
+        toast(`Imported "${name}" — ${cards.length} verbs`);
+        renderHome();
+      } else { toast("Imported, syncing…"); syncNow({ afterSync: renderHome }); }
+    } else if (r.status === 409) {
+      const existing = r.body.existing;
+      showDialog("Already in the shared database",
+        `This chapter's kanji match an existing one${existing ? `, "<b>${existing.name}</b>"` : ""}. Nothing was added.`,
+        existing && existing.created_at ? `Originally imported ${new Date(existing.created_at).toLocaleDateString()}` : "");
+    } else if (r.status === 403) {
+      showDialog("Permission denied", "Only the admin can import chapters.");
+    } else if (r.status === 401) {
+      handleAuthExpired();
+    } else {
+      showDialog("Import failed", (r.body && r.body.error) ? r.body.error : "Unknown error from server.");
+    }
+  } catch(err) {
+    showDialog("Couldn't read that file", "Make sure it's a JSON export in the expected format: <code>{ \"chapterName\": \"...\", \"cards\": [...] }</code>");
+  }
+  e.target.value = "";
+});
+
+document.addEventListener("keydown", (e)=>{
+  if (screen !== "browse" || browseView !== "card") return;
+  if (e.key === "ArrowLeft" && browseIdx > 0) { browseIdx--; renderBrowseCard(); }
+  else if (e.key === "ArrowRight" && browseIdx < browseList.length-1) { browseIdx++; renderBrowseCard(); }
+  else if (e.key === "Escape") { browseView = "grid"; renderBrowse(); }
+});
+
+(async function init(){
+  loadAuth();
+  if (authToken && authUser) {
+    await afterLogin();
+  } else {
+    renderLogin();
+  }
+})();
