@@ -439,7 +439,6 @@ async function syncNow(opts = {}){
   syncing = true;
   setStatus("syncing", "syncing…");
   try {
-    // 1. Sync Kanji Progress
     const dirtyItems = Object.entries(progress)
       .filter(([_, p]) => p.dirty)
       .map(([cardKeyStr, p]) => {
@@ -459,7 +458,6 @@ async function syncNow(opts = {}){
       } else if (r.status === 401) { handleAuthExpired(); return; }
     }
 
-    // 2. Sync Vocab Progress
     if (vocabDirty) {
       const vocabItems = Object.entries(vocabProgress)
         .filter(([_, p]) => p.dirty)
@@ -479,19 +477,16 @@ async function syncNow(opts = {}){
       }
     }
 
-    // 3. Sync Streaks
     if (dirtyStreakDates.size > 0) {
       const r = await api("/api/streak", { method: "POST", body: JSON.stringify({ dates: Array.from(dirtyStreakDates) }) });
       if (r.ok) { dirtyStreakDates.clear(); await saveLocalStreaks(); }
     }
 
-    // 4. Sync Settings
     if (settingsDirty) {
       const r = await api("/api/settings", { method: "POST", body: JSON.stringify({ data: settings }) });
       if (r.ok) { settingsDirty = false; await storeSet(K_SETTINGS_DIRTY, "0"); }
     }
 
-    // 5. Sync Weak (Kanji)
     if (weakDirty) {
       const weakItems = Object.keys(weakStats)
         .map(id => {
@@ -508,7 +503,6 @@ async function syncNow(opts = {}){
       }
     }
 
-    // 6. Sync Weak (Vocab)
     if (vocabWeakDirty) {
       const vWeakItems = Object.keys(vocabWeakStats)
         .map(vKey => {
@@ -521,7 +515,6 @@ async function syncNow(opts = {}){
       }
     }
 
-    // 7. Sync Daily
     ensureDailyIsToday();
     if (dailyData.seen.length > 0) {
       const dailyCardIds = dailyData.seen
@@ -535,7 +528,6 @@ async function syncNow(opts = {}){
       }
     }
 
-    // 8. Pull Server State (Chapters)
     const listRes = await api("/api/chapters");
     if (!listRes.ok) {
       if (listRes.status === 401) { handleAuthExpired(); return; }
@@ -567,7 +559,6 @@ async function syncNow(opts = {}){
     rebuildVocab();
     await saveLocalProgress();
 
-    // 9. Pull Server Progress (Kanji)
     const pRes = await api("/api/progress?card_type=kanji");
     if (pRes.ok) {
       const serverProgress = pRes.body.progress || [];
@@ -586,7 +577,6 @@ async function syncNow(opts = {}){
       await saveLocalProgress();
     }
 
-    // 10. Pull Server Progress (Vocab)
     const vpRes = await api("/api/progress?card_type=vocab");
     if (vpRes.ok) {
       const serverVProgress = vpRes.body.progress || [];
@@ -604,7 +594,6 @@ async function syncNow(opts = {}){
       await saveLocalVocabProgress();
     }
 
-    // Pull Streaks
     const sRes = await api("/api/streak");
     if (sRes.ok) {
       (sRes.body.dates || []).forEach(d => { streakDates[d] = true; });
@@ -1758,6 +1747,7 @@ function renderMenu(){
       <div class="menu-item" id="m-import" style="padding:14px 16px;">📥 Import chapter</div>
       <div class="menu-item" id="m-import-vocab" style="padding:14px 16px;">📖 Import kotoba</div>
       <div class="menu-item" id="m-manage" style="padding:14px 16px;">📂 Manage chapters</div>
+      <div class="menu-item" id="m-manage-vocab" style="padding:14px 16px;">📖 Manage kotoba</div>
       ` : ""}
       <div class="menu-item" id="m-stats" style="padding:14px 16px;">📊 Stats &amp; streak</div>
       <div class="menu-item" id="m-settings" style="padding:14px 16px;">⚙️ Settings</div>
@@ -1777,6 +1767,8 @@ function renderMenu(){
   if (importVocabBtn) importVocabBtn.addEventListener("click", renderKotobaImport);
   const manageBtn = document.getElementById("m-manage");
   if (manageBtn) manageBtn.addEventListener("click", renderManage);
+  const manageVocabBtn = document.getElementById("m-manage-vocab");
+  if (manageVocabBtn) manageVocabBtn.addEventListener("click", renderManageKotoba);
   document.getElementById("m-stats").addEventListener("click", renderStatsScreen);
   document.getElementById("m-settings").addEventListener("click", renderSettings);
   document.getElementById("m-sync").addEventListener("click", ()=>{ toast("Syncing…"); syncNow({ afterSync: ()=> toast("Sync complete") }); });
@@ -1918,6 +1910,35 @@ function renderCurrentChapterCard(chapterId){
   </div>`;
 }
 
+function renderKotobaCard(lesson){
+  const cards = vocabCardsByLesson[lesson.id] || [];
+  const mastered = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) >= MAX_BOX).length;
+  const learned = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) > 0).length;
+  const pctMastered = cards.length ? Math.round(100 * mastered / cards.length) : 0;
+  
+  let stLabel = "Not started";
+  let stCls = "status-none";
+  if (mastered === cards.length && cards.length > 0) { stLabel = "Mastered"; stCls = "status-mastered"; }
+  else if (mastered > 0 || learned > 0) { stLabel = "Practicing"; stCls = "status-practicing"; }
+
+  return `<div class="current-card" data-vlesson="${lesson.id}">
+    <div class="cc-toprow">
+      <div class="cc-number" style="background:var(--blue);">${lesson.position + 1}</div>
+    </div>
+    <div class="cc-name">${lesson.name}</div>
+    <div class="cc-sub">${cards.length} words · ${mastered} of ${cards.length} mastered</div>
+    <div class="cc-progressbar"><div style="width:${pctMastered}%"></div></div>
+    <div class="cc-statusrow">
+      <span class="cc-status-badge ${stCls}">${stLabel}</span>
+      <span style="font-size:11px;color:var(--muted);">${pctMastered}% mastered</span>
+    </div>
+    <div class="cc-btnrow" style="grid-template-columns: 1fr 1fr;">
+      <button class="primary quick-btn" data-vlesson="${lesson.id}">⚡ Quick Session<span class="btn-sub">test your recall right now</span></button>
+      <button data-vmode="browse" data-vlesson="${lesson.id}">👁 Browse<span class="btn-sub">read through all cards</span></button>
+    </div>
+  </div>`;
+}
+
 function renderCarousel(chapterIds){
   if (!chapterIds.length) return "";
   const idx = Math.max(0, chapterIds.indexOf(currentChapterId));
@@ -2052,30 +2073,6 @@ function renderKanjiHome(){
       <div class="ac-hint">Chapters you've fully locked in. They stay here, safe. You can always come back to review them.</div>
     </div>`;
   }
-
-  html += `<div class="list-toggle" id="listToggle">▾ All kanji chapters (${chapters.length})</div>`;
-  html += `<div class="list-hint">Tap to see every chapter and its progress</div>`;
-  html += `<div id="allChaptersList" style="display:none;">`;
-  chapters.forEach((ch, idx)=>{
-    const st = chapterStatus(ch.id);
-    const unlocked = isUnlocked(ch.id);
-    const lockedCls = unlocked ? "" : " locked";
-    const tabCls = st.key === "mastered" ? "chapter-tab mastered" : (unlocked ? "chapter-tab" : "chapter-tab locked");
-    const m = chapterMastery(ch.id);
-    const displayName = cleanChapterName(ch.name);
-    html += `<div class="chapter-row${lockedCls}" data-goto="${ch.id}">
-      <div class="${tabCls}">${idx+1}</div>
-      <div class="chapter-body">
-        <div class="chapter-head">
-          <div><div class="cname">${displayName}</div><div class="ccount">${ch.cards.length} verbs · ${m.box3}/${m.total} mastered</div></div>
-          <div style="text-align:right;">
-            <span class="status-badge ${st.cls}">${unlocked ? st.label : "Locked"}</span>
-          </div>
-        </div>
-      </div>
-    </div>`;
-  });
-  html += `</div>`;
   return html;
 }
 
@@ -2095,34 +2092,18 @@ function renderKotobaHomeTab(){
   });
   const orderedUnits = vocabUnits.slice().sort((a,b) => (a.position||0) - (b.position||0));
 
-  let unitBlocks = orderedUnits.map(u => {
+  let html = "";
+  orderedUnits.forEach(u => {
     const group = byUnit[u.id];
-    if (!group || group.lessons.length === 0) return "";
-    const lessonRows = group.lessons.map(l => {
-      const cards = vocabCardsByLesson[l.id] || [];
-      const mastered = cards.filter(c => (vocabProgress[vocabKey(c.id)]?.box || 0) >= MAX_BOX).length;
-      return `<div class="chapter-row" data-vlesson="${l.id}">
-        <div class="chapter-tab" style="background: var(--blue);">${l.position + 1}</div>
-        <div class="chapter-body">
-          <div class="chapter-head">
-            <div>
-              <div class="cname">${l.name}</div>
-              <div class="ccount">${cards.length} words · ${mastered} mastered</div>
-            </div>
-            <div style="text-align:right;">
-              <span class="status-badge ${mastered === cards.length && cards.length > 0 ? "status-mastered" : "status-none"}">${mastered === cards.length && cards.length > 0 ? "Mastered" : "Study"}</span>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join("");
-    return `<div style="margin-bottom:18px;">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px;">${u.name}</div>
-      ${lessonRows}
-    </div>`;
-  }).join("");
+    if (!group || group.lessons.length === 0) return;
+    
+    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding:0 4px;">${u.name}</div>`;
+    
+    const cardsHtml = group.lessons.map(l => renderKotobaCard(l)).join("");
+    html += `<div class="card-grid" style="grid-template-columns: 1fr; gap:16px; margin-bottom:24px;">${cardsHtml}</div>`;
+  });
 
-  return unitBlocks || '<div class="empty"><p>No lessons yet.</p></div>';
+  return html || '<div class="empty"><p>No lessons yet.</p></div>';
 }
 
 function renderHome(){
@@ -2176,36 +2157,25 @@ function renderHome(){
     document.querySelectorAll(".quick-btn").forEach(btn=>{
       btn.addEventListener("click", ()=> startQuickPicker(btn.dataset.ch));
     });
-
-    const lt = document.getElementById("listToggle");
-    const list = document.getElementById("allChaptersList");
-    if (lt && list) {
-      lt.addEventListener("click", ()=>{
-        const open = list.style.display !== "none";
-        list.style.display = open ? "none" : "block";
-        lt.textContent = `${open ? "▾" : "▴"} All kanji chapters (${chapters.length})`;
-      });
-      document.querySelectorAll("[data-goto]").forEach(row=>{
-        row.addEventListener("click", ()=>{
-          const id = row.dataset.goto;
-          if (!isUnlocked(id)) { showDialog("Locked chapter", "Reach Solid in earlier chapters to unlock this one. Or switch to Free mode in Settings."); return; }
-          if (isMastered(id)) { 
-            showDialog("Chapter mastered 🏆", "This chapter is fully locked in. You can review it from the Mastered section on the home screen.", "Open Menu → 🏆 Mastered chapters to practice it."); 
-            return; 
-          }
-          currentChapterId = id;
-          saveCurrentChapter();
-          renderHome();
-        });
-      });
-    }
     renderPresenceStrip();
   } else {
     // Kotoba Tab wiring
     const fi = document.getElementById("firstImportVocab");
     if (fi) fi.addEventListener("click", renderKotobaImport);
-    document.querySelectorAll("[data-vlesson]").forEach(row => {
-      row.addEventListener("click", () => renderKotobaLessonPicker(Number(row.dataset.vlesson)));
+
+    document.querySelectorAll("[data-vmode]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const lessonId = Number(btn.dataset.vlesson);
+        const mode = btn.dataset.vmode;
+        if (mode === "browse") renderKotobaBrowse(lessonId);
+      });
+    });
+    document.querySelectorAll(".quick-btn[data-vlesson]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startVocabQuick(Number(btn.dataset.vlesson));
+      });
     });
   }
 }
@@ -2864,6 +2834,96 @@ function renderManage(){
       rebuildVocab();
       toast("Chapter renamed");
       renderManage();
+    });
+  });
+}
+
+/* ================= MANAGE KOTOBA ================= */
+function renderManageKotoba(){
+  screen = "manage-kotoba";
+  showTopbar(true);
+  if (!isAdmin()) { renderHome(); return; }
+  const app = document.getElementById("app");
+  
+  const byUnit = {};
+  vocabUnits.forEach(u => { byUnit[u.id] = { unit: u, lessons: [] }; });
+  vocabLessons.forEach(l => {
+    if (!byUnit[l.unit_id]) byUnit[l.unit_id] = { unit: { id: l.unit_id, name: "(unit)" }, lessons: [] };
+    byUnit[l.unit_id].lessons.push(l);
+  });
+  const orderedUnits = vocabUnits.slice().sort((a,b) => (a.position||0) - (b.position||0));
+
+  let html = "";
+  orderedUnits.forEach(u => {
+    const group = byUnit[u.id];
+    const lessonRows = group.lessons.map(l => {
+      const cards = vocabCardsByLesson[l.id] || [];
+      return `<div class="manage-row" style="padding-left:20px;">
+        <span class="rname" style="font-size:12px;">${l.name} <span style="color:var(--muted);font-weight:400;">(${cards.length})</span></span>
+        <div class="manage-actions">
+          <button class="link-btn2" data-vrename="${l.id}">rename</button>
+          <button class="del-btn" data-vdel="${l.id}">delete</button>
+        </div>
+      </div>`;
+    }).join("");
+
+    html += `<div style="margin-bottom:12px;">
+      <div class="manage-row" style="background:var(--bg); border:none; font-weight:700;">
+        <span class="rname">${u.name}</span>
+        <div class="manage-actions">
+          <button class="del-btn" data-vunitdel="${u.id}">delete unit</button>
+        </div>
+      </div>
+      ${lessonRows || '<div class="hint" style="padding-left:20px;">No lessons</div>'}
+    </div>`;
+  });
+
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Manage Kotoba</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      ${html || '<div class="hint">No kotoba data yet.</div>'}
+      <button class="small-btn" id="importFromKotobaPanel">+ import a new lesson</button>
+    </div>`;
+  
+  document.getElementById("backBtn").addEventListener("click", renderHome);
+  document.getElementById("importFromKotobaPanel").addEventListener("click", renderKotobaImport);
+  
+  document.querySelectorAll("[data-vunitdel]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this entire unit and all its lessons?")) return;
+      const r = await api("/api/vocab/units/" + btn.dataset.vunitdel, { method: "DELETE" });
+      if (!r.ok) { toast("Delete failed"); return; }
+      await pullVocab();
+      renderManageKotoba();
+    });
+  });
+
+  document.querySelectorAll("[data-vdel]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this lesson?")) return;
+      const r = await api("/api/vocab/lessons/" + btn.dataset.vdel, { method: "DELETE" });
+      if (!r.ok) { toast("Delete failed"); return; }
+      await pullVocab();
+      renderManageKotoba();
+    });
+  });
+
+  document.querySelectorAll("[data-vrename]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const lesson = vocabLessons.find(l => l.id === Number(btn.dataset.vrename));
+      if (!lesson) return;
+      const newName = prompt("Rename lesson:", lesson.name);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === lesson.name) return;
+      
+      // Since we don't have a PATCH endpoint for vocab yet, we'll skip the actual rename call for now and just mock it
+      // Or ideally, we should add a PATCH /api/vocab/lessons/:id endpoint. I will add the endpoint in the next server update.
+      const r = await api("/api/vocab/lessons/" + lesson.id, {
+        method: "PATCH", body: JSON.stringify({ name: trimmed })
+      });
+      if (!r.ok) { toast("Rename failed"); return; }
+      await pullVocab();
+      renderManageKotoba();
     });
   });
 }

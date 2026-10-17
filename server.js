@@ -35,7 +35,14 @@ function hashChapter(name, cards) {
   h.update(kanjiList.join("\n"));
   return h.digest("hex");
 }
-
+app.patch("/api/vocab/lessons/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const { name } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
+  const trimmed = name.trim();
+  await pool.query("UPDATE vocab_lessons SET name = ? WHERE id = ?", [trimmed, id]);
+  res.json({ ok: true, id, name: trimmed });
+});
 function sign(user) {
   return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
 }
