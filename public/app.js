@@ -2018,8 +2018,6 @@ function wireCarousel(chapterIds){
 
 function renderKanjiHome(){
   let html = `<div id="presenceStrip"></div>`;
-  html += renderFocusSlider();
-  html += renderDailyGoal();
 
   if (chapters.length === 0) {
     html += `<div class="card" style="margin-bottom:16px;"><div class="empty"><div class="big">📥</div>
@@ -2116,7 +2114,9 @@ function renderHome(){
   detectDemotions();
 
   const tabHtml = `
-    <div class="home-tabs">
+    ${renderFocusSlider()}
+    ${renderDailyGoal()}
+    <div class="home-tabs" style="margin-top: 16px;">
       <button class="home-tab ${currentTab === "kanji" ? "active" : ""}" id="tabKanji">Kanji</button>
       <button class="home-tab ${currentTab === "kotoba" ? "active" : ""}" id="tabKotoba">Kotoba</button>
     </div>
@@ -3216,12 +3216,11 @@ function renderVocabQuick(){
   `;
   document.getElementById("backBtn").addEventListener("click", () => { syncNow(); currentTab = "kotoba"; renderHome(); });
   document.getElementById("tapzone").addEventListener("click", () => {
-    markCardSeen(vocabKey(c.id));
-    const backHtml = isMeaningKind
-      ? `<div class="reading">${c.def_ja || c.meaning}</div>
-         ${c.def_ja ? `<div class="meaning">${c.meaning}</div>` : ""}
-         <div style="font-size:12px;color:var(--muted);margin-top:4px;">${c.kana}</div>
-         ${c.note ? `<div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${c.note}</div>` : ""}
+        const backHtml = isMeaningKind
+      ? `<div class="reading" style="font-size: 26px; margin-bottom: 8px;">${c.def_ja || c.meaning}</div>
+         ${c.def_ja ? `<div class="meaning" style="font-size: 16px; color: var(--muted); margin-bottom: 12px;">${c.meaning}</div>` : ""}
+         <div class="reading" style="font-size: 22px; margin-bottom: 0;">${c.kana}</div>
+         ${c.note ? `<div style="font-size:11.5px;color:var(--muted);margin-top:12px;">${c.note}</div>` : ""}
          ${c.sentence ? `<div class="sentence">${c.sentence}</div>` : ""}`
       : `<div class="reading">${c.kana}</div>
          <div class="meaning">${c.meaning}</div>
