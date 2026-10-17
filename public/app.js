@@ -830,7 +830,6 @@ function renderInvitePicker(targetUser){
   showTopbar(true);
   const app = document.getElementById("app");
   
-  // Get all unlocked chapters
   const unlocked = chapters.filter(c => isUnlocked(c.id));
   
   let rows = unlocked.map(ch => {
@@ -905,7 +904,7 @@ async function checkUnseenReactions(){
     unreadNotifCount = notifications.length;
     updateNotifBadge();
     await api("/api/reactions/seen", { method: "POST", body: JSON.stringify({ ids }) });
-  } catch(e) {}
+  } catch(e) { console.error("Reaction error:", e); }
 }
 
 function updateNotifBadge(){
@@ -957,7 +956,6 @@ async function renderNotificationsScreen(){
 }
 
 window.acceptInvite = function(serverChapterId) {
-  // Find local chapter by server ID
   const localCh = chapters.find(c => String(c.serverId) === String(serverChapterId));
   if (localCh) {
     startQuick(localCh.id, "flash");

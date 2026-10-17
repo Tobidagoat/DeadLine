@@ -276,16 +276,27 @@ app.get("/api/reactions/unseen", auth, async (req, res) => {
      ORDER BY r.created_at ASC`,
     [req.user.id]
   );
-  res.json({ reactions: rows.map(r => ({
-    id: r.id,
-    emoji: r.emoji,
-    kind: r.kind || "reaction",
-    payload: r.payload ? (typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload) : null,
-    created_at: r.created_at,
-    from_user_id: r.from_user_id,
-    from_display_name: r.from_display_name || r.from_username,
-    from_avatar_emoji: r.from_avatar_emoji || null,
-  })) });
+  
+  res.json({ reactions: rows.map(r => {
+    let parsedPayload = null;
+    if (r.payload) {
+      try {
+        // MySQL sometimes returns JSON as a parsed object, sometimes as a string. Handle both.
+        parsedPayload = typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload;
+      } catch(e) { console.error("Payload parse error", e); }
+    }
+    
+    return {
+      id: r.id,
+      emoji: r.emoji,
+      kind: r.kind || "reaction",
+      payload: parsedPayload, // <--- THIS WAS THE BUG
+      created_at: r.created_at,
+      from_user_id: r.from_user_id,
+      from_display_name: r.from_display_name || r.from_username,
+      from_avatar_emoji: r.from_avatar_emoji || null,
+    };
+  })});
 });
 
 app.post("/api/reactions/seen", auth, async (req, res) => {
