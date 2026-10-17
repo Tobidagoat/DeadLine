@@ -636,7 +636,13 @@ app.post("/api/vocab/import", auth, adminOnly, async (req, res) => {
     conn.release();
   }
 });
-
+app.patch("/api/vocab/units/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const { name } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
+  await pool.query("UPDATE vocab_units SET name = ? WHERE id = ?", [name.trim(), id]);
+  res.json({ ok: true });
+});
 /* delete a whole unit (admin only) */
 app.delete("/api/vocab/units/:id", auth, adminOnly, async (req, res) => {
   const id = Number(req.params.id);

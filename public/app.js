@@ -2871,6 +2871,7 @@ function renderManageKotoba(){
       <div class="manage-row" style="background:var(--bg); border:none; font-weight:700;">
         <span class="rname">${u.name}</span>
         <div class="manage-actions">
+                    <button class="link-btn2" data-vunitrename="${u.id}">rename unit</button>
           <button class="del-btn" data-vunitdel="${u.id}">delete unit</button>
         </div>
       </div>
@@ -2886,7 +2887,23 @@ function renderManageKotoba(){
   
   document.getElementById("backBtn").addEventListener("click", renderHome);
   document.getElementById("importFromKotobaPanel").addEventListener("click", renderKotobaImport);
-  
+    document.querySelectorAll("[data-vunitrename]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const unit = vocabUnits.find(u => u.id === Number(btn.dataset.vunitrename));
+      if (!unit) return;
+      const newName = prompt("Rename unit:", unit.name);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === unit.name) return;
+      
+      const r = await api("/api/vocab/units/" + unit.id, {
+        method: "PATCH", body: JSON.stringify({ name: trimmed })
+      });
+      if (!r.ok) { toast("Rename failed"); return; }
+      await pullVocab();
+      renderManageKotoba();
+    });
+  });
   document.querySelectorAll("[data-vunitdel]").forEach(btn => {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this entire unit and all its lessons?")) return;
