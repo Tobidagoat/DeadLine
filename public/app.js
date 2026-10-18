@@ -213,6 +213,14 @@ let screen = "login";
 let activeChapterId = null;
 let isNewAccount = false;
 
+// Match State (Global so we can clear the interval)
+let matchPollTimer = null;
+let currentMatchId = null;
+let currentRaceQueue = [];
+let myRaceScore = 0;
+let myRaceDone = false;
+let currentMatchPlayers = [];
+
 // notifications
 let notifications = [];
 let unreadNotifCount = 0;
@@ -893,12 +901,11 @@ function renderInvitePicker(targetUser){
 window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
   const r = await api("/api/match/create", {
     method: "POST",
-    body: JSON.stringify({ guest_id: Number(toUserId), chapter_id: Number(chapterServerId) })
+    body: JSON.stringify({ chapter_id: Number(chapterServerId) })
   });
 
   if (r.ok) {
     toast(`Invite sent to opponent!`);
-    // Send the notification to their bell
     await api("/api/reactions", {
       method: "POST",
       body: JSON.stringify({ 
@@ -908,7 +915,6 @@ window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
         payload: { match_id: r.body.match_id, chapter_id: Number(chapterServerId), chapter_name: chapterName }
       })
     });
-    // Put the Host in the waiting room
     const localCh = chapters.find(c => String(c.serverId) === String(chapterServerId));
     startMatchRace(r.body.match_id, localCh.id);
   } else {
@@ -924,7 +930,6 @@ async function checkUnseenReactions(){
     const list = r.body.reactions;
     if (list.length === 0) return;
     
-    // Limit notifications to last 15
     if (list.length > 15) list.splice(0, list.length - 15);
 
     const ids = [];
@@ -1015,125 +1020,138 @@ window.acceptInvite = async function(notifId, matchId, serverChapterId) {
   const localCh = chapters.find(c => String(c.serverId) === String(serverChapterId));
   if (!localCh) return toast("Couldn't find that chapter.");
   
-  // Tell server to start the match
   const r = await api("/api/match/join/" + matchId, { method: "POST" });
   if (r.ok) {
     startMatchRace(matchId, localCh.id);
   } else {
-    toast("Failed to join match");
+    toast(r.body && r.body.error ? r.body.error : "Failed to join match");
   }
 };
 
 async function startMatchRace(matchId, localChapterId){
   screen = "match-lobby";
   showTopbar(true);
+  currentMatchId = matchId;
   const app = document.getElementById("app");
   
   app.innerHTML = `<div class="card"><div class="empty"><div class="big">⏳</div>
-    <div style="font-size:20px;font-weight:700;">Waiting for opponent...</div>
-    <p>They are joining the room. Get ready!</p>
+    <div style="font-size:20px;font-weight:700;">Waiting for players...</div>
+    <p>Get ready to race!</p>
   </div></div>`;
   
-  // Poll match status
-  const poll = setInterval(async () => {
+  clearInterval(matchPollTimer);
+  matchPollTimer = setInterval(async () => {
     const r = await api("/api/match/status/" + matchId);
     if (!r.ok) return;
     const m = r.body.match;
     
     if (m.status === "playing") {
-      clearInterval(poll);
+      clearInterval(matchPollTimer); // STOP POLLING!
       startLiveQuiz(matchId, localChapterId);
+    }
+    if (m.status === "finished") {
+      clearInterval(matchPollTimer);
+      toast("Match finished!");
+      renderHome();
     }
   }, 2000);
 }
 
-let currentMatchId = null;
-let currentMatchScores = { host: 0, guest: 0, hostDone: false, guestDone: false };
-
 async function startLiveQuiz(matchId, localChapterId) {
-  currentMatchId = matchId;
   screen = "match-quiz";
   
-  // Get cards for this chapter and slice to 10 for the race
   const cards = chapterCards(localChapterId).map(v => v.id);
-  const queue = shuffleArr(cards).slice(0, 10);
-  
-  // Initialize local race vars
-  currentMatchScores = { host: 0, guest: 0, hostDone: false, guestDone: false };
-  
-  // The server handles host/guest internally. We just poll for UI updates.
-  setInterval(async () => {
-    if (screen !== "match-quiz") return;
-    const r = await api("/api/match/status/" + matchId);
-    if (!r.ok) return;
-    const m = r.body.match;
-    
-    // Determine if I am host or guest
-    const isHost = m.host_id === authUser.id;
-    currentMatchScores = {
-      host: m.host_score,
-      guest: m.guest_score,
-      hostDone: m.host_done,
-      guestDone: m.guest_done
-    };
+  currentRaceQueue = shuffleArr(cards).slice(0, 10);
+  myRaceScore = 0;
+  myRaceDone = false;
 
-    if (screen === "match-quiz") renderRaceQuestion(queue, localChapterId, isHost);
+  // One final fetch to get current players list
+  const r = await api("/api/match/status/" + matchId);
+  if (r.ok) currentMatchPlayers = r.body.match.players;
+  
+  // Poll for live scores
+  matchPollTimer = setInterval(async () => {
+    if (screen !== "match-quiz" && screen !== "match-results") return;
+    const res = await api("/api/match/status/" + matchId);
+    if (!res.ok) return;
+    
+    currentMatchPlayers = res.body.match.players;
+    
+    if (screen === "match-quiz") {
+      renderRaceQuestion(localChapterId);
+    }
   }, 2000);
 
-  renderRaceQuestion(queue, localChapterId, true);
+  renderRaceQuestion(localChapterId);
 }
 
-function renderRaceQuestion(queue, localChapterId, isHost){
+function renderRaceQuestion(localChapterId){
   const app = document.getElementById("app");
   
-  // If both are done, show results
-  if (currentMatchScores.hostDone && currentMatchScores.guestDone) {
+  // Check if everyone is done
+  const allDone = currentMatchPlayers.every(p => p.done);
+  if (allDone) {
     screen = "match-results";
-    let result = "🤝 Tie!";
-    if (currentMatchScores.host > currentMatchScores.guest) result = "🏆 You win!";
-    if (currentMatchScores.host < currentMatchScores.guest) result = "💀 You lost!";
+    clearInterval(matchPollTimer);
     
-    app.innerHTML = `<div class="card"><div class="empty">
-      <div class="big">${result}</div>
-      <h2>${currentMatchScores.host} - ${currentMatchScores.guest}</h2>
-      <p>Great study session!</p>
-      <button class="small-btn" onclick="renderHome()">Back to Home</button>
+    // Sort players by score
+    const sorted = currentMatchPlayers.slice().sort((a,b) => b.score - a.score);
+    
+    let podium = sorted.map((p, i) => {
+      const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i+1}`;
+      const isMe = p.id === authUser.id;
+      return `<div class="manage-row" style="background:${isMe ? 'var(--accent-soft)' : 'transparent'}; border-radius:8px; padding:12px;">
+        <span style="font-size:16px; width:32px; text-align:center;">${medal}</span>
+        <span style="font-size:20px; margin:0 8px;">${p.emoji || DEFAULT_EMOJI}</span>
+        <span class="rname" style="font-size:14px;">${p.name} ${isMe ? '(you)' : ''}</span>
+        <div style="font-weight:700; color:var(--seal);">${p.score} pts</div>
+      </div>`;
+    }).join("");
+
+    app.innerHTML = `<div class="card"><div class="empty" style="padding:20px;">
+      <div class="big">🏁</div>
+      <h2>Race Complete!</h2>
+      <div style="margin-top:20px; width:100%;">${podium}</div>
+      <button class="small-btn" style="margin-top:20px;" onclick="renderHome()">Back to Home</button>
     </div></div>`;
     return;
   }
 
-  // If I am done but opponent isn't
-  if ((isHost && currentMatchScores.hostDone) || (!isHost && currentMatchScores.guestDone)) {
+  // If I am done but others aren't
+  const me = currentMatchPlayers.find(p => p.id === authUser.id);
+  if (me && me.done) {
     app.innerHTML = `<div class="card"><div class="empty"><div class="big">⏳</div>
-      <h2>You finished! Waiting...</h2>
-      <p>Opponent score: ${isHost ? currentMatchScores.guest : currentMatchScores.host}</p>
+      <h2>You finished!</h2>
+      <p>Waiting for everyone else to finish...</p>
     </div></div>`;
     return;
   }
 
-  // If opponent is done but I'm not, warn them (optional)
-  if ((isHost && currentMatchScores.guestDone) || (!isHost && currentMatchScores.hostDone)) {
-    toast("Opponent finished! Catch up!");
-  }
-
-  // Render next card in queue
-  if (queue.length === 0) {
-    // Local finish
+  // Render next card
+  if (currentRaceQueue.length === 0) {
+    myRaceDone = true;
     api("/api/match/score/" + currentMatchId, {
       method: "POST",
-      body: JSON.stringify({ score: isHost ? currentMatchScores.host : currentMatchScores.guest, done: true })
+      body: JSON.stringify({ score: myRaceScore, done: true })
     });
     return;
   }
 
-  const v = findVocab(queue[0]);
+  const v = findVocab(currentRaceQueue[0]);
   
+  // Build live scoreboard
+  const scoreboard = currentMatchPlayers.map(p => {
+    const isMe = p.id === authUser.id;
+    return `<span style="margin-right:12px; font-weight:${isMe?'700':'400'}; color:${isMe?'var(--seal)':'var(--ink)'};">
+      ${p.name}: ${p.score}
+    </span>`;
+  }).join("");
+
   app.innerHTML = `
-    <div class="session-progress">
-      <span>Host: ${currentMatchScores.host}</span>
-      <span>Guest: ${currentMatchScores.guest}</span>
+    <div class="session-progress" style="flex-wrap:wrap;">
+      ${scoreboard}
     </div>
-    <div class="progressbar"><div style="width:${(10-queue.length)*10}%"></div></div>
+    <div class="progressbar"><div style="width:${(10-currentRaceQueue.length)*10}%"></div></div>
     <div class="card tapzone" id="tapzone">
       <div class="chaptertag">⚡ LIVE RACE · ${cleanChapterName(chapterById(localChapterId).name)}</div>
       <div class="kanji">${v.k}</div>
@@ -1151,27 +1169,24 @@ function renderRaceQuestion(queue, localChapterId, isHost){
       <button class="g-wrong" id="markWrong">✗ Wrong</button>
       <button class="g-right" id="markRight">✓ Correct</button>
     </div>`;
-    document.getElementById("markRight").addEventListener("click", ()=> raceAnswer(queue, localChapterId, isHost, true));
-    document.getElementById("markWrong").addEventListener("click", ()=> raceAnswer(queue, localChapterId, isHost, false));
+    document.getElementById("markRight").addEventListener("click", ()=> raceAnswer(true));
+    document.getElementById("markWrong").addEventListener("click", ()=> raceAnswer(false));
   });
 }
 
-async function raceAnswer(queue, localChapterId, isHost, correct){
-  queue.shift(); // remove current card
-  if (correct) {
-    if (isHost) currentMatchScores.host++;
-    else currentMatchScores.guest++;
-  }
+async function raceAnswer(correct){
+  currentRaceQueue.shift(); 
+  if (correct) myRaceScore++;
   
   await api("/api/match/score/" + currentMatchId, {
     method: "POST",
     body: JSON.stringify({ 
-      score: isHost ? currentMatchScores.host : currentMatchScores.guest, 
-      done: queue.length === 0 
+      score: myRaceScore, 
+      done: currentRaceQueue.length === 0 
     })
   });
   
-  renderRaceQuestion(queue, localChapterId, isHost);
+  renderRaceQuestion(quickChapterId); // Pass the local chapter ID stored in a global variable or scope
 }
 
 function startPresenceLoop(){

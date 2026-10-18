@@ -29,6 +29,11 @@ if (!JWT_SECRET || JWT_SECRET.length < 20) {
   process.exit(1);
 }
 
+const VALID_CARD_TYPES = ["kanji", "vocab"];
+function normalizeCardType(t) {
+  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
+}
+
 function hashChapter(name, cards) {
   const kanjiList = cards.map(c => (c.k || c.kanji || "").trim()).filter(Boolean).sort();
   const h = crypto.createHash("sha256");
@@ -73,13 +78,7 @@ function publicUser(row) {
     is_admin: !!row.is_admin,
   };
 }
-function normalizeCardType(t) {
-  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
-}
-const VALID_CARD_TYPES = ["kanji", "vocab"];
-function normalizeCardType(t) {
-  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
-}
+
 async function seedUsers() {
   const users = [
     { name: process.env.SEED_USER_1, pass: process.env.SEED_PASSWORD },
@@ -300,16 +299,39 @@ app.post("/api/reactions/seen", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- MATCHES (1v1 Live Quiz) ---------- */
+/* ---------- MATCHES (Multiplayer Live Quiz) ---------- */
 app.post("/api/match/create", auth, async (req, res) => {
-  const { guest_id, chapter_id } = req.body || {};
-  if (!guest_id || !chapter_id) return res.status(400).json({ error: "guest_id and chapter_id required" });
+  const { chapter_id } = req.body || {};
+  if (!chapter_id) return res.status(400).json({ error: "chapter_id required" });
   
   const [r] = await pool.query(
-    "INSERT INTO matches (host_id, guest_id, chapter_id, status) VALUES (?, ?, ?, 'pending')",
-    [req.user.id, guest_id, chapter_id]
+    "INSERT INTO matches (host_id, guest_id, chapter_id, status) VALUES (?, 0, ?, 'pending')",
+    [req.user.id, chapter_id]
   );
-  res.json({ ok: true, match_id: r.insertId });
+  const matchId = r.insertId;
+  
+  await pool.query(
+    "INSERT IGNORE INTO match_players (match_id, user_id) VALUES (?, ?)",
+    [matchId, req.user.id]
+  );
+  
+  res.json({ ok: true, match_id: matchId });
+});
+
+app.post("/api/match/join/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  
+  const [mRows] = await pool.query("SELECT status FROM matches WHERE id = ?", [id]);
+  if (mRows.length === 0) return res.status(404).json({ error: "Match not found" });
+  if (mRows[0].status === 'finished') return res.status(400).json({ error: "Match already finished" });
+  
+  await pool.query(
+    "INSERT IGNORE INTO match_players (match_id, user_id) VALUES (?, ?)",
+    [id, req.user.id]
+  );
+  
+  await pool.query("UPDATE matches SET status = 'playing' WHERE id = ? AND status = 'pending'", [id]);
+  res.json({ ok: true });
 });
 
 app.get("/api/match/status/:id", auth, async (req, res) => {
@@ -317,44 +339,47 @@ app.get("/api/match/status/:id", auth, async (req, res) => {
   const [rows] = await pool.query("SELECT * FROM matches WHERE id = ?", [id]);
   if (rows.length === 0) return res.status(404).json({ error: "match not found" });
   const m = rows[0];
-  const isHost = m.host_id === req.user.id;
-  const isGuest = m.guest_id === req.user.id;
-  if (!isHost && !isGuest) return res.status(403).json({ error: "not your match" });
+
+  const [players] = await pool.query(
+    `SELECT mp.user_id, mp.score, mp.done, u.display_name, u.avatar_emoji
+     FROM match_players mp
+     JOIN users u ON u.id = mp.user_id
+     WHERE mp.match_id = ?`,
+    [id]
+  );
 
   res.json({
     match: {
       id: m.id,
       status: m.status,
       chapter_id: m.chapter_id,
-      host_id: m.host_id,
-      guest_id: m.guest_id,
-      host_score: m.host_score,
-      guest_score: m.guest_score,
-      host_done: !!m.host_done,
-      guest_done: !!m.guest_done
+      players: players.map(p => ({
+        id: p.user_id,
+        name: p.display_name,
+        emoji: p.avatar_emoji,
+        score: p.score,
+        done: !!p.done
+      }))
     }
   });
-});
-
-app.post("/api/match/join/:id", auth, async (req, res) => {
-  const id = Number(req.params.id);
-  await pool.query("UPDATE matches SET status = 'playing' WHERE id = ? AND status = 'pending'", [id]);
-  res.json({ ok: true });
 });
 
 app.post("/api/match/score/:id", auth, async (req, res) => {
   const id = Number(req.params.id);
   const { score, done } = req.body || {};
-  const [rows] = await pool.query("SELECT * FROM matches WHERE id = ?", [id]);
-  if (rows.length === 0) return res.status(404).json({ error: "match not found" });
-  const m = rows[0];
-  const isHost = m.host_id === req.user.id;
   
-  if (isHost) {
-    await pool.query("UPDATE matches SET host_score = ?, host_done = ? WHERE id = ?", [score, done ? 1 : 0, id]);
-  } else {
-    await pool.query("UPDATE matches SET guest_score = ?, guest_done = ? WHERE id = ?", [score, done ? 1 : 0, id]);
+  await pool.query(
+    "UPDATE match_players SET score = ?, done = ? WHERE match_id = ? AND user_id = ?",
+    [score, done ? 1 : 0, id, req.user.id]
+  );
+
+  // Check if ALL players are done
+  const [players] = await pool.query("SELECT done FROM match_players WHERE match_id = ?", [id]);
+  const allDone = players.every(p => p.done);
+  if (allDone) {
+    await pool.query("UPDATE matches SET status = 'finished' WHERE id = ?", [id]);
   }
+  
   res.json({ ok: true });
 });
 
