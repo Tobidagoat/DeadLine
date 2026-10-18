@@ -510,7 +510,23 @@ app.patch("/api/chapters/:id", auth, adminOnly, async (req, res) => {
   await pool.query("UPDATE chapters SET name = ? WHERE id = ?", [trimmed, id]);
   res.json({ ok: true, id, name: trimmed });
 });
-
+/* ---------- users (admin only) ---------- */
+app.delete("/api/users/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) {
+    return res.status(400).json({ error: "You cannot delete yourself" });
+  }
+  try {
+    const [rows] = await pool.query("SELECT id FROM users WHERE id = ?", [id]);
+    if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+    
+    await pool.query("DELETE FROM users WHERE id = ?", [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 app.delete("/api/chapters/:id", auth, adminOnly, async (req, res) => {
   const id = Number(req.params.id);
   await pool.query("DELETE FROM chapters WHERE id = ?", [id]);

@@ -1825,6 +1825,7 @@ function renderMenu(){
       ${authUser.is_admin ? `
       <div class="menu-item" id="m-import" style="padding:14px 16px;">📥 Import chapter</div>
       <div class="menu-item" id="m-manage" style="padding:14px 16px;">📂 Manage chapters</div>
+      <div class="menu-item" id="m-manage-users" style="padding:14px 16px;">👥 Manage users</div>
       ` : ""}
       <div class="menu-item" id="m-stats" style="padding:14px 16px;">📊 Stats &amp; streak</div>
       <div class="menu-item" id="m-settings" style="padding:14px 16px;">⚙️ Settings</div>
@@ -1851,6 +1852,8 @@ function renderMenu(){
 
   const importBtn = document.getElementById("m-import");
   if (importBtn) importBtn.addEventListener("click", ()=> document.getElementById("importFile").click());
+    const manageUsersBtn = document.getElementById("m-manage-users");
+  if (manageUsersBtn) manageUsersBtn.addEventListener("click", renderManageUsers);
   const manageBtn = document.getElementById("m-manage");
   if (manageBtn) manageBtn.addEventListener("click", renderManage);
   document.getElementById("m-stats").addEventListener("click", renderStatsScreen);
@@ -2988,7 +2991,69 @@ function renderManage(){
     });
   });
 }
+/* ================= MANAGE USERS ================= */
+async function renderManageUsers(){
+  screen = "manage-users";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Manage Users</span></div>
+    <div class="panel"><div class="empty"><p>Loading users...</p></div></div>`;
+  
+  document.getElementById("backBtn").addEventListener("click", renderMenu);
 
+  const r = await api("/api/presence"); // We can reuse the presence route to get all users
+  if (!r.ok) {
+    app.innerHTML = `<div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Manage Users</span></div>
+      <div class="card"><div class="empty"><p>Could not load users.</p></div></div>`;
+    return;
+  }
+
+  const users = r.body.users || [];
+  let rows = users.map(u => {
+    const isMe = String(u.id) === String(authUser.id);
+    const name = u.display_name || u.username;
+    const emoji = u.avatar_emoji || DEFAULT_EMOJI;
+    
+    return `<div class="manage-row">
+      <span style="font-size:20px; margin-right:8px;">${emoji}</span>
+      <span class="rname">${name} <span style="color:var(--muted); font-weight:400;">(@${u.username})</span></span>
+      ${isMe 
+        ? `<span style="font-size:11px; color:var(--muted);">(you)</span>` 
+        : `<button class="del-btn" data-deluser="${u.id}">delete</button>`
+      }
+    </div>`;
+  }).join("");
+
+  app.innerHTML = `<div class="backrow"><button id="backBtn">← menu</button><span class="screen-title">Manage Users</span></div>
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="font-size:12px; font-weight:700; margin-bottom:12px;">Registered players (${users.length})</div>
+      <div style="max-height: 400px; overflow-y: auto;">
+        ${rows}
+      </div>
+    </div>`;
+  
+  document.getElementById("backBtn").addEventListener("click", renderMenu);
+
+  document.querySelectorAll("[data-deluser]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const targetId = btn.dataset.deluser;
+      if (!confirm("Are you sure you want to permanently delete this user and all their progress? This cannot be undone.")) return;
+      
+      btn.disabled = true;
+      btn.textContent = "deleting...";
+      
+      const delRes = await api("/api/users/" + targetId, { method: "DELETE" });
+      if (delRes.ok) {
+        toast("User deleted.");
+        renderManageUsers(); // Reload the list
+      } else {
+        btn.disabled = false;
+        btn.textContent = "delete";
+        toast(delRes.body && delRes.body.error ? delRes.body.error : "Failed to delete user");
+      }
+    });
+  });
+}
 /* ================= SETTINGS ================= */
 function renderSettings(){
   screen = "settings";
