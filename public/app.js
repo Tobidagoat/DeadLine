@@ -2506,7 +2506,10 @@ function renderQuick(){
     document.getElementById("tapzone").addEventListener("click", ()=>{
       markCardSeen(v.id);
       document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
-        <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+        <div class="reading-row">
+  <div class="reading">${v.r}</div>
+  <button class="tts-btn" onclick="playAudio('${v.k}')" title="Listen">🔊</button>
+</div>
         <div class="meaning">${v.m}</div>
         <div class="sentence">${v.s}</div>
       </div>`;
@@ -2647,7 +2650,10 @@ function renderBrowseCard(){
         <button class="star-toggle ${isFlagged?"on":""}" id="starBtn" title="Flag for redo">★</button>
         <div class="chaptertag">${cleanChapterName(v.chapterName)} · level ${p.box}</div>
         <div class="kanji">${v.k}</div>
-        <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+        <div class="reading-row">
+  <div class="reading">${v.r}</div>
+  <button class="tts-btn" onclick="playAudio('${v.k}')" title="Listen">🔊</button>
+</div>
         <div class="meaning">${v.m}</div>
         <div class="sentence">${v.s}</div>
       </div>
@@ -2750,7 +2756,10 @@ function renderLearnTest(){
   document.getElementById("backBtn").addEventListener("click", backHome);
   document.getElementById("tapzone").addEventListener("click", ()=>{
     document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
-      <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+      <div class="reading-row">
+  <div class="reading">${v.r}</div>
+  <button class="tts-btn" onclick="playAudio('${v.k}')" title="Listen">🔊</button>
+</div>
       <div class="meaning">${v.m}</div>
     </div>`;
     document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
@@ -2847,7 +2856,10 @@ function renderGlobalReview(){
   document.getElementById("backBtn").addEventListener("click", backHome);
   document.getElementById("tapzone").addEventListener("click", ()=>{
     document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
-      <div class="reading" style="cursor:pointer;" onclick="playAudio('${v.k}')">${v.r} 🔊</div>
+      <div class="reading-row">
+  <div class="reading">${v.r}</div>
+  <button class="tts-btn" onclick="playAudio('${v.k}')" title="Listen">🔊</button>
+</div>
       <div class="meaning">${v.m}</div>
       <div class="sentence">${v.s}</div>
     </div>`;
@@ -3083,6 +3095,14 @@ function renderSettings(){
         </div>
         <div class="hint">Adds ~20% cards from other unfinished chapters into Quick sessions.</div>
       </div>
+            <div class="setting-row">
+        <label>Appearance</label>
+        <div class="seg-control">
+          <button class="seg-btn ${document.body.getAttribute("data-theme") !== "dark" ? "active" : ""}" id="themeLight">Light</button>
+          <button class="seg-btn ${document.body.getAttribute("data-theme") === "dark" ? "active" : ""}" id="themeDark">Dark</button>
+        </div>
+        <div class="hint">Switch to a darker theme for late-night study.</div>
+      </div>
       <div class="setting-row">
         <label>Notification sounds</label>
         <div class="seg-control">
@@ -3135,6 +3155,16 @@ function renderSettings(){
   document.getElementById("modeFree").addEventListener("click", ()=>{ settings.studyMode = "free"; renderSettings(); });
   document.getElementById("interOn").addEventListener("click", ()=>{ settings.interleaving = true; renderSettings(); });
   document.getElementById("interOff").addEventListener("click", ()=>{ settings.interleaving = false; renderSettings(); });
+    document.getElementById("themeLight").addEventListener("click", ()=>{
+    document.body.removeAttribute("data-theme");
+    localStorage.setItem("kanji-theme", "light");
+    renderSettings();
+  });
+  document.getElementById("themeDark").addEventListener("click", ()=>{
+    document.body.setAttribute("data-theme", "dark");
+    localStorage.setItem("kanji-theme", "dark");
+    renderSettings();
+  });
   document.getElementById("soundOnBtn").addEventListener("click", ()=>{ settings.soundEnabled = true; renderSettings(); });
   document.getElementById("soundOffBtn").addEventListener("click", ()=>{ settings.soundEnabled = false; renderSettings(); });
   document.getElementById("shuffleOnBtn").addEventListener("click", ()=>{ settings.shuffle = true; renderSettings(); });
@@ -3216,6 +3246,11 @@ document.addEventListener("keydown", (e)=>{
 
 (async function init(){
   loadAuth();
+    try {
+    if (localStorage.getItem("kanji-theme") === "dark") {
+      document.body.setAttribute("data-theme", "dark");
+    }
+  } catch(e) {}
   if (authToken && authUser) {
     await afterLogin();
   } else {
