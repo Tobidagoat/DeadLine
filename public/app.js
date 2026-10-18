@@ -213,7 +213,7 @@ let screen = "login";
 let activeChapterId = null;
 let isNewAccount = false;
 
-// Match State (Global so we can clear the interval)
+// Match State
 let matchPollTimer = null;
 let currentMatchId = null;
 let currentRaceQueue = [];
@@ -741,6 +741,8 @@ function presenceStatus(lastActiveAt){
   const t = new Date(lastActiveAt).getTime();
   if (isNaN(t)) return "offline";
   const diff = Date.now() - t;
+  // Hide completely if inactive > 15 mins
+  if (diff > 15 * 60 * 1000) return "hidden";
   if (diff < 2 * 60 * 1000) return "online";
   if (diff < 10 * 60 * 1000) return "recent";
   return "offline";
@@ -748,7 +750,7 @@ function presenceStatus(lastActiveAt){
 function describeActivity(u){
   if (!u || !u.last_active_at) return "offline";
   const st = presenceStatus(u.last_active_at);
-  if (st === "offline") return "offline";
+  if (st === "offline" || st === "hidden") return "offline";
   if (u.current_activity && u.current_chapter_name) {
     const verb = u.current_activity === "browse" ? "reading"
       : u.current_activity === "learn" ? "learning"
@@ -766,7 +768,8 @@ async function fetchPresence(){
   try {
     const r = await api("/api/presence");
     if (r.ok && r.body && r.body.users) {
-      presenceUsers = r.body.users;
+      // Filter out anyone who is hidden
+      presenceUsers = r.body.users.filter(u => presenceStatus(u.last_active_at) !== "hidden");
       if (screen === "home") renderPresenceStrip();
     }
   } catch(e) {}
@@ -1065,11 +1068,9 @@ async function startLiveQuiz(matchId, localChapterId) {
   myRaceScore = 0;
   myRaceDone = false;
 
-  // One final fetch to get current players list
   const r = await api("/api/match/status/" + matchId);
   if (r.ok) currentMatchPlayers = r.body.match.players;
   
-  // Poll for live scores
   matchPollTimer = setInterval(async () => {
     if (screen !== "match-quiz" && screen !== "match-results") return;
     const res = await api("/api/match/status/" + matchId);
@@ -1088,13 +1089,11 @@ async function startLiveQuiz(matchId, localChapterId) {
 function renderRaceQuestion(localChapterId){
   const app = document.getElementById("app");
   
-  // Check if everyone is done
   const allDone = currentMatchPlayers.every(p => p.done);
   if (allDone) {
     screen = "match-results";
     clearInterval(matchPollTimer);
     
-    // Sort players by score
     const sorted = currentMatchPlayers.slice().sort((a,b) => b.score - a.score);
     
     let podium = sorted.map((p, i) => {
@@ -1117,7 +1116,6 @@ function renderRaceQuestion(localChapterId){
     return;
   }
 
-  // If I am done but others aren't
   const me = currentMatchPlayers.find(p => p.id === authUser.id);
   if (me && me.done) {
     app.innerHTML = `<div class="card"><div class="empty"><div class="big">⏳</div>
@@ -1127,7 +1125,6 @@ function renderRaceQuestion(localChapterId){
     return;
   }
 
-  // Render next card
   if (currentRaceQueue.length === 0) {
     myRaceDone = true;
     api("/api/match/score/" + currentMatchId, {
@@ -1139,7 +1136,6 @@ function renderRaceQuestion(localChapterId){
 
   const v = findVocab(currentRaceQueue[0]);
   
-  // Build live scoreboard
   const scoreboard = currentMatchPlayers.map(p => {
     const isMe = p.id === authUser.id;
     return `<span style="margin-right:12px; font-weight:${isMe?'700':'400'}; color:${isMe?'var(--seal)':'var(--ink)'};">
@@ -1186,7 +1182,7 @@ async function raceAnswer(correct){
     })
   });
   
-  renderRaceQuestion(quickChapterId); // Pass the local chapter ID stored in a global variable or scope
+  renderRaceQuestion(quickChapterId);
 }
 
 function startPresenceLoop(){
@@ -1995,19 +1991,38 @@ function renderDailyGoal(){
   const c = 2 * Math.PI * r;
   const offset = c * (1 - pct);
   const doneText = done >= goal ? "✓" : `${done}`;
-  return `<div class="goal-strip">
-    <div class="goal-ring">
-      <svg width="42" height="42">
-        <circle class="gr-bg" cx="21" cy="21" r="${r}" stroke-width="4" fill="none"></circle>
-        <circle class="gr-fill" cx="21" cy="21" r="${r}" stroke-width="4" fill="none"
-          stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"></circle>
-      </svg>
-      <div class="gr-num">${doneText}</div>
+  
+  // Calculate accuracy for today
+  let totalMisses = 0;
+  let totalCards = 0;
+  const t = todayKey();
+  Object.keys(progress).forEach(id => {
+    const p = progress[id];
+    if (p.last_seen && p.last_seen.slice(0,10) === t) {
+      totalCards++;
+      totalMisses += (p.misses || 0);
+    }
+  });
+  const acc = totalCards > 0 ? Math.max(0, Math.round(100 * (1 - totalMisses / totalCards))) : 100;
+  
+  return `<div class="goal-strip" style="flex-direction:column; align-items:stretch; gap:10px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="goal-ring">
+        <svg width="42" height="42">
+          <circle class="gr-bg" cx="21" cy="21" r="${r}" stroke-width="4" fill="none"></circle>
+          <circle class="gr-fill" cx="21" cy="21" r="${r}" stroke-width="4" fill="none"
+            stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"></circle>
+        </svg>
+        <div class="gr-num">${doneText}</div>
+      </div>
+      <div class="goal-text">
+        <div class="gt-title">Daily goal</div>
+        <div class="gt-sub">${done} / ${goal} cards today${done >= goal ? " · done!" : ""}</div>
+        <div class="gt-hint">Study ${goal} cards today to keep your streak alive.</div>
+      </div>
     </div>
-    <div class="goal-text">
-      <div class="gt-title">Daily goal</div>
-      <div class="gt-sub">${done} / ${goal} cards today${done >= goal ? " · done!" : ""}</div>
-      <div class="gt-hint">Study ${goal} cards today to keep your streak alive.</div>
+    <div style="font-size:11px; color:var(--muted); text-align:center; border-top:1px solid var(--line); padding-top:8px;">
+      Today: <b>${totalCards}</b> reviewed · <b>${acc}%</b> accuracy
     </div>
   </div>`;
 }
