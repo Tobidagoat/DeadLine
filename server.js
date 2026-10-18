@@ -73,7 +73,13 @@ function publicUser(row) {
     is_admin: !!row.is_admin,
   };
 }
-
+function normalizeCardType(t) {
+  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
+}
+const VALID_CARD_TYPES = ["kanji", "vocab"];
+function normalizeCardType(t) {
+  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
+}
 async function seedUsers() {
   const users = [
     { name: process.env.SEED_USER_1, pass: process.env.SEED_PASSWORD },
