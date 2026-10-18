@@ -801,25 +801,34 @@ function openUserCard(u){
   const close = ()=> overlay.remove();
   overlay.addEventListener("click", (e)=>{ if (e.target === overlay) close(); });
   document.getElementById("ucClose").addEventListener("click", close);
+  
   const inviteBtn = document.getElementById("ucInvite");
   if (inviteBtn) inviteBtn.addEventListener("click", ()=>{
     close();
     renderInvitePicker(u);
   });
+  
   overlay.querySelectorAll(".reaction-btn").forEach(btn => {
     btn.addEventListener("click", async ()=>{
       const emoji = btn.dataset.emoji;
       btn.disabled = true;
+      
       const r = await api("/api/reactions", {
         method: "POST",
-        body: JSON.stringify({ to_user_id: u.id, emoji })
+        body: JSON.stringify({ 
+          to_user_id: Number(u.id), 
+          emoji: emoji 
+        })
       });
+      
       if (r.ok) {
         toast(`Sent ${emoji} to ${name}`);
         close();
       } else {
         btn.disabled = false;
-        toast(r.body && r.body.error ? r.body.error : "Failed to send");
+        const errMsg = r.body && r.body.error ? r.body.error : "Unknown error";
+        alert("Failed to send: " + errMsg); // <--- This will show you EXACTLY why it fails
+        toast(`Failed: ${errMsg}`);
       }
     });
   });
@@ -853,16 +862,17 @@ window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
   const r = await api("/api/reactions", {
     method: "POST",
     body: JSON.stringify({ 
-      to_user_id: toUserId, 
+      to_user_id: Number(toUserId), 
       emoji: "🎮", 
       kind: "quiz_invite",
-      payload: { chapter_id: chapterServerId, chapter_name: chapterName }
+      payload: { chapter_id: Number(chapterServerId), chapter_name: chapterName }
     })
   });
   if (r.ok) {
     toast(`Invite sent!`);
     renderHome();
   } else {
+    alert("Invite failed: " + (r.body ? r.body.error : "Unknown server error"));
     toast("Failed to send invite");
   }
 };
