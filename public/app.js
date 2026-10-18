@@ -2021,7 +2021,7 @@ function renderDailyGoal(){
       <div class="goal-text">
         <div class="gt-title">Daily goal</div>
         <div class="gt-sub">${done} / ${goal} cards today${done >= goal ? " · done!" : ""}</div>
-        <div class="gt-hint">Study ${goal} cards today to keep your streak alive.</div>
+       <div class="gt-hint" style="color: var(--muted);">Study ${goal} cards today to keep your streak alive.</div>
       </div>
     </div>
     <div style="font-size:11px; color:var(--muted); text-align:center; border-top:1px solid var(--line); padding-top:8px;">
