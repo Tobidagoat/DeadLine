@@ -891,20 +891,28 @@ function renderInvitePicker(targetUser){
 }
 
 window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
-  const r = await api("/api/reactions", {
+  const r = await api("/api/match/create", {
     method: "POST",
-    body: JSON.stringify({ 
-      to_user_id: Number(toUserId), 
-      emoji: "🎮", 
-      kind: "quiz_invite",
-      payload: { chapter_id: Number(chapterServerId), chapter_name: chapterName }
-    })
+    body: JSON.stringify({ guest_id: Number(toUserId), chapter_id: Number(chapterServerId) })
   });
+
   if (r.ok) {
-    toast(`Invite sent!`);
-    renderHome();
+    toast(`Invite sent to opponent!`);
+    // Send the notification to their bell
+    await api("/api/reactions", {
+      method: "POST",
+      body: JSON.stringify({ 
+        to_user_id: Number(toUserId), 
+        emoji: "🎮", 
+        kind: "quiz_invite",
+        payload: { match_id: r.body.match_id, chapter_id: Number(chapterServerId), chapter_name: chapterName }
+      })
+    });
+    // Put the Host in the waiting room
+    const localCh = chapters.find(c => String(c.serverId) === String(chapterServerId));
+    startMatchRace(r.body.match_id, localCh.id);
   } else {
-    toast("Failed to send invite");
+    toast("Failed to create match");
   }
 };
 
@@ -980,7 +988,7 @@ async function renderNotificationsScreen(){
       if (n.kind === "quiz_invite" && n.payload) {
         const ageMin = (Date.now() - new Date(n.created_at).getTime()) / 60000;
         if (ageMin < 15) {
-          actionBtn = `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="acceptInvite('${n.id}', '${n.payload.chapter_id}')">Accept & Study ⚡</button>`;
+          actionBtn = `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="acceptInvite('${n.id}', '${n.payload.match_id}', '${n.payload.chapter_id}')">Accept & Study ⚡</button>`;
         } else {
           actionBtn = `<span style="font-size:11px; color:var(--danger);">Expired</span>`;
         }
@@ -1003,24 +1011,16 @@ async function renderNotificationsScreen(){
   document.getElementById("backBtn").addEventListener("click", renderHome);
 }
 
-window.acceptInvite = async function(notifId, serverChapterId) {
+window.acceptInvite = async function(notifId, matchId, serverChapterId) {
   const localCh = chapters.find(c => String(c.serverId) === String(serverChapterId));
   if (!localCh) return toast("Couldn't find that chapter.");
   
-  // Find the notification to get the inviter's ID
-  const n = notifications.find(x => String(x.id) === String(notifId));
-  if (!n) return;
-
-  // Create match on server
-  const r = await api("/api/match/create", {
-    method: "POST",
-    body: JSON.stringify({ guest_id: Number(n.from_user_id), chapter_id: Number(serverChapterId) })
-  });
-  
+  // Tell server to start the match
+  const r = await api("/api/match/join/" + matchId, { method: "POST" });
   if (r.ok) {
-    startMatchRace(r.body.match_id, localCh.id);
+    startMatchRace(matchId, localCh.id);
   } else {
-    toast("Failed to start match");
+    toast("Failed to join match");
   }
 };
 
