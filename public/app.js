@@ -876,6 +876,61 @@ window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
     toast("Failed to send invite");
   }
 };
+/* ================= sounds ================= */
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+    } catch(e) { return null; }
+  }
+  return audioCtx;
+}
+function playTone(freq, startAt, duration, volume, type){
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(()=>{});
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freq, ctx.currentTime + startAt);
+  gain.gain.setValueAtTime(0, ctx.currentTime + startAt);
+  gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + startAt + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startAt + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(ctx.currentTime + startAt);
+  osc.stop(ctx.currentTime + startAt + duration + 0.05);
+}
+function playReactionSound(emoji){
+  if (!settings.soundEnabled) return;
+  try {
+    if (emoji === "🔥") {
+      playTone(660, 0, 0.12, 0.09, "triangle");
+      playTone(880, 0.08, 0.18, 0.09, "triangle");
+      playTone(1320, 0.16, 0.22, 0.08, "triangle");
+    } else if (emoji === "👋") {
+      playTone(880, 0, 0.14, 0.1, "sine");
+      playTone(660, 0.12, 0.18, 0.1, "sine");
+    } else if (emoji === "💪") {
+      playTone(220, 0, 0.18, 0.11, "sine");
+      playTone(330, 0.08, 0.22, 0.08, "sine");
+    } else if (emoji === "😅") {
+      playTone(1200, 0, 0.06, 0.07, "square");
+      playTone(1100, 0.08, 0.06, 0.07, "square");
+    } else if (emoji === "🤔") {
+      playTone(440, 0, 0.14, 0.09, "sine");
+      playTone(587, 0.14, 0.22, 0.09, "sine");
+    } else if (emoji === "🎮") {
+      playTone(523, 0, 0.1, 0.09, "triangle");
+      playTone(659, 0.09, 0.1, 0.09, "triangle");
+      playTone(784, 0.18, 0.15, 0.09, "triangle");
+    } else {
+      playTone(720, 0, 0.15, 0.08, "sine");
+    }
+  } catch(e) {}
+}
 
 async function checkUnseenReactions(){
   if (!authToken) return;
