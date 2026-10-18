@@ -294,26 +294,14 @@ function ensureDailyIsToday(){
 
 async function wipeUserLocalCache(){
   await Promise.all([
-    storeDel(K_LOCAL_PROGRESS),
-    storeDel(K_LOCAL_STREAKS),
-    storeDel(K_SETTINGS),
-    storeDel(K_QUICKSTATS),
-    storeDel(K_WEAKSTATS),
-    storeDel(K_DAILY),
-    storeDel(K_CURRENT_CHAPTER),
-    storeDel(K_SETTINGS_DIRTY),
-    storeDel(K_WEAK_DIRTY),
+    storeDel(K_LOCAL_PROGRESS), storeDel(K_LOCAL_STREAKS), storeDel(K_SETTINGS),
+    storeDel(K_QUICKSTATS), storeDel(K_WEAKSTATS), storeDel(K_DAILY),
+    storeDel(K_CURRENT_CHAPTER), storeDel(K_SETTINGS_DIRTY), storeDel(K_WEAK_DIRTY),
   ]);
-  progress = {};
-  streakDates = {};
-  dirtyStreakDates = new Set();
+  progress = {}; streakDates = {}; dirtyStreakDates = new Set();
   settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-  quickStats = {};
-  weakStats = {};
-  dailyData = { date: "", seen: [] };
-  currentChapterId = null;
-  settingsDirty = false;
-  weakDirty = false;
+  quickStats = {}; weakStats = {}; dailyData = { date: "", seen: [] };
+  currentChapterId = null; settingsDirty = false; weakDirty = false;
 }
 
 async function loadLocal(){
@@ -376,8 +364,8 @@ async function syncNow(opts = {}){
           card_type: "kanji", card_id: v.serverCardId, box: p.box, due: p.due, misses: p.misses,
           last_seen: p.last_seen || new Date().toISOString()
         };
-      })
-      .filter(Boolean);
+      }).filter(Boolean);
+
     if (dirtyItems.length > 0) {
       const r = await api("/api/progress", { method: "POST", body: JSON.stringify({ items: dirtyItems }) });
       if (r.ok) {
@@ -402,8 +390,7 @@ async function syncNow(opts = {}){
           const v = VOCAB.find(x => x.id === id);
           if (!v || !v.serverCardId) return null;
           return { card_type: "kanji", card_id: v.serverCardId, misses: weakStats[id].misses || 0 };
-        })
-        .filter(Boolean);
+        }).filter(Boolean);
       if (weakItems.length > 0) {
         const r = await api("/api/weak", { method: "POST", body: JSON.stringify({ items: weakItems }) });
         if (r.ok) { weakDirty = false; await storeSet(K_WEAK_DIRTY, "0"); }
@@ -418,8 +405,7 @@ async function syncNow(opts = {}){
         .map(id => {
           const v = VOCAB.find(x => x.id === id);
           return v && v.serverCardId ? v.serverCardId : null;
-        })
-        .filter(Boolean);
+        }).filter(Boolean);
       if (dailyCardIds.length > 0) {
         await api("/api/daily", { method: "POST", body: JSON.stringify({ date: dailyData.date, card_ids: dailyCardIds, card_type: "kanji" }) });
       }
@@ -679,6 +665,62 @@ function playAudio(text) {
   window.speechSynthesis.speak(utterance);
 }
 
+/* ================= sounds ================= */
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+    } catch(e) { return null; }
+  }
+  return audioCtx;
+}
+function playTone(freq, startAt, duration, volume, type){
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(()=>{});
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freq, ctx.currentTime + startAt);
+  gain.gain.setValueAtTime(0, ctx.currentTime + startAt);
+  gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + startAt + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startAt + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(ctx.currentTime + startAt);
+  osc.stop(ctx.currentTime + startAt + duration + 0.05);
+}
+function playReactionSound(emoji){
+  if (!settings.soundEnabled) return;
+  try {
+    if (emoji === "🔥") {
+      playTone(660, 0, 0.12, 0.09, "triangle");
+      playTone(880, 0.08, 0.18, 0.09, "triangle");
+      playTone(1320, 0.16, 0.22, 0.08, "triangle");
+    } else if (emoji === "👋") {
+      playTone(880, 0, 0.14, 0.1, "sine");
+      playTone(660, 0.12, 0.18, 0.1, "sine");
+    } else if (emoji === "💪") {
+      playTone(220, 0, 0.18, 0.11, "sine");
+      playTone(330, 0.08, 0.22, 0.08, "sine");
+    } else if (emoji === "😅") {
+      playTone(1200, 0, 0.06, 0.07, "square");
+      playTone(1100, 0.08, 0.06, 0.07, "square");
+    } else if (emoji === "🤔") {
+      playTone(440, 0, 0.14, 0.09, "sine");
+      playTone(587, 0.14, 0.22, 0.09, "sine");
+    } else if (emoji === "🎮") {
+      playTone(523, 0, 0.1, 0.09, "triangle");
+      playTone(659, 0.09, 0.1, 0.09, "triangle");
+      playTone(784, 0.18, 0.15, 0.09, "triangle");
+    } else {
+      playTone(720, 0, 0.15, 0.08, "sine");
+    }
+  } catch(e) {}
+}
+
 /* ================= presence ================= */
 let presenceUsers = [];
 let presenceTimer = null;
@@ -801,34 +843,25 @@ function openUserCard(u){
   const close = ()=> overlay.remove();
   overlay.addEventListener("click", (e)=>{ if (e.target === overlay) close(); });
   document.getElementById("ucClose").addEventListener("click", close);
-  
   const inviteBtn = document.getElementById("ucInvite");
   if (inviteBtn) inviteBtn.addEventListener("click", ()=>{
     close();
     renderInvitePicker(u);
   });
-  
   overlay.querySelectorAll(".reaction-btn").forEach(btn => {
     btn.addEventListener("click", async ()=>{
       const emoji = btn.dataset.emoji;
       btn.disabled = true;
-      
       const r = await api("/api/reactions", {
         method: "POST",
-        body: JSON.stringify({ 
-          to_user_id: Number(u.id), 
-          emoji: emoji 
-        })
+        body: JSON.stringify({ to_user_id: Number(u.id), emoji })
       });
-      
       if (r.ok) {
         toast(`Sent ${emoji} to ${name}`);
         close();
       } else {
         btn.disabled = false;
-        const errMsg = r.body && r.body.error ? r.body.error : "Unknown error";
-        alert("Failed to send: " + errMsg); // <--- This will show you EXACTLY why it fails
-        toast(`Failed: ${errMsg}`);
+        toast(r.body && r.body.error ? r.body.error : "Failed to send");
       }
     });
   });
@@ -840,7 +873,6 @@ function renderInvitePicker(targetUser){
   const app = document.getElementById("app");
   
   const unlocked = chapters.filter(c => isUnlocked(c.id));
-  
   let rows = unlocked.map(ch => {
     return `<div class="manage-row" style="cursor:pointer;" onclick="sendInvite(${targetUser.id}, ${ch.serverId}, '${cleanChapterName(ch.name)}')">
       <span class="rname" style="font-weight:700;">${cleanChapterName(ch.name)}</span>
@@ -872,65 +904,9 @@ window.sendInvite = async function(toUserId, chapterServerId, chapterName) {
     toast(`Invite sent!`);
     renderHome();
   } else {
-    alert("Invite failed: " + (r.body ? r.body.error : "Unknown server error"));
     toast("Failed to send invite");
   }
 };
-/* ================= sounds ================= */
-let audioCtx = null;
-function getAudioCtx(){
-  if (!audioCtx) {
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return null;
-      audioCtx = new Ctx();
-    } catch(e) { return null; }
-  }
-  return audioCtx;
-}
-function playTone(freq, startAt, duration, volume, type){
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  if (ctx.state === "suspended") ctx.resume().catch(()=>{});
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = type || "sine";
-  osc.frequency.setValueAtTime(freq, ctx.currentTime + startAt);
-  gain.gain.setValueAtTime(0, ctx.currentTime + startAt);
-  gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + startAt + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startAt + duration);
-  osc.connect(gain).connect(ctx.destination);
-  osc.start(ctx.currentTime + startAt);
-  osc.stop(ctx.currentTime + startAt + duration + 0.05);
-}
-function playReactionSound(emoji){
-  if (!settings.soundEnabled) return;
-  try {
-    if (emoji === "🔥") {
-      playTone(660, 0, 0.12, 0.09, "triangle");
-      playTone(880, 0.08, 0.18, 0.09, "triangle");
-      playTone(1320, 0.16, 0.22, 0.08, "triangle");
-    } else if (emoji === "👋") {
-      playTone(880, 0, 0.14, 0.1, "sine");
-      playTone(660, 0.12, 0.18, 0.1, "sine");
-    } else if (emoji === "💪") {
-      playTone(220, 0, 0.18, 0.11, "sine");
-      playTone(330, 0.08, 0.22, 0.08, "sine");
-    } else if (emoji === "😅") {
-      playTone(1200, 0, 0.06, 0.07, "square");
-      playTone(1100, 0.08, 0.06, 0.07, "square");
-    } else if (emoji === "🤔") {
-      playTone(440, 0, 0.14, 0.09, "sine");
-      playTone(587, 0.14, 0.22, 0.09, "sine");
-    } else if (emoji === "🎮") {
-      playTone(523, 0, 0.1, 0.09, "triangle");
-      playTone(659, 0.09, 0.1, 0.09, "triangle");
-      playTone(784, 0.18, 0.15, 0.09, "triangle");
-    } else {
-      playTone(720, 0, 0.15, 0.08, "sine");
-    }
-  } catch(e) {}
-}
 
 async function checkUnseenReactions(){
   if (!authToken) return;
@@ -939,6 +915,10 @@ async function checkUnseenReactions(){
     if (!r.ok || !r.body || !r.body.reactions) return;
     const list = r.body.reactions;
     if (list.length === 0) return;
+    
+    // Limit notifications to last 15
+    if (list.length > 15) list.splice(0, list.length - 15);
+
     const ids = [];
     for (const rx of list) {
       const kind = rx.kind || "reaction";
@@ -956,13 +936,8 @@ async function checkUnseenReactions(){
       setTimeout(()=> el.remove(), 4000);
       
       notifications.push({
-        id: rx.id,
-        emoji: rx.emoji,
-        kind,
-        payload: rx.payload,
-        from_user_id: rx.from_user_id,
-        from_display_name: rx.from_display_name,
-        created_at: rx.created_at,
+        id: rx.id, emoji: rx.emoji, kind, payload: rx.payload,
+        from_user_id: rx.from_user_id, from_display_name: rx.from_display_name, created_at: rx.created_at,
       });
       ids.push(rx.id);
     }
@@ -989,6 +964,7 @@ async function renderNotificationsScreen(){
   unreadNotifCount = 0;
   updateNotifBadge();
   let listHtml = "";
+  
   if (notifications.length === 0) {
     listHtml = `<div class="card"><div class="empty"><div class="big">🔔</div>
       <div style="font-size:15px;font-weight:700;">No notifications yet</div>
@@ -1000,9 +976,15 @@ async function renderNotificationsScreen(){
         title = `${n.from_display_name} wants to study ${n.payload.chapter_name}`;
       }
       
-      const actionBtn = (n.kind === "quiz_invite" && n.payload)
-        ? `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="acceptInvite('${n.payload.chapter_id}')">Accept & Study ⚡</button>`
-        : "";
+      let actionBtn = "";
+      if (n.kind === "quiz_invite" && n.payload) {
+        const ageMin = (Date.now() - new Date(n.created_at).getTime()) / 60000;
+        if (ageMin < 15) {
+          actionBtn = `<button class="small-btn" style="margin:8px 0 0 0; padding:6px 12px; font-size:11px;" onclick="acceptInvite('${n.id}', '${n.payload.chapter_id}')">Accept & Study ⚡</button>`;
+        } else {
+          actionBtn = `<span style="font-size:11px; color:var(--danger);">Expired</span>`;
+        }
+      }
 
       return `<div class="notif-row">
         <div class="nr-emoji">${n.emoji}</div>
@@ -1013,6 +995,7 @@ async function renderNotificationsScreen(){
       </div>`;
     }).join("") + `</div>`;
   }
+  
   app.innerHTML = `
     <div class="backrow"><button id="backBtn">← home</button><span class="screen-title">Notifications</span></div>
     ${listHtml}
@@ -1020,15 +1003,176 @@ async function renderNotificationsScreen(){
   document.getElementById("backBtn").addEventListener("click", renderHome);
 }
 
-window.acceptInvite = function(serverChapterId) {
+window.acceptInvite = async function(notifId, serverChapterId) {
   const localCh = chapters.find(c => String(c.serverId) === String(serverChapterId));
-  if (localCh) {
-    startQuick(localCh.id, "flash");
-    toast("Shared quiz started!");
+  if (!localCh) return toast("Couldn't find that chapter.");
+  
+  // Find the notification to get the inviter's ID
+  const n = notifications.find(x => String(x.id) === String(notifId));
+  if (!n) return;
+
+  // Create match on server
+  const r = await api("/api/match/create", {
+    method: "POST",
+    body: JSON.stringify({ guest_id: Number(n.from_user_id), chapter_id: Number(serverChapterId) })
+  });
+  
+  if (r.ok) {
+    startMatchRace(r.body.match_id, localCh.id);
   } else {
-    toast("Couldn't find that chapter.");
+    toast("Failed to start match");
   }
 };
+
+async function startMatchRace(matchId, localChapterId){
+  screen = "match-lobby";
+  showTopbar(true);
+  const app = document.getElementById("app");
+  
+  app.innerHTML = `<div class="card"><div class="empty"><div class="big">⏳</div>
+    <div style="font-size:20px;font-weight:700;">Waiting for opponent...</div>
+    <p>They are joining the room. Get ready!</p>
+  </div></div>`;
+  
+  // Poll match status
+  const poll = setInterval(async () => {
+    const r = await api("/api/match/status/" + matchId);
+    if (!r.ok) return;
+    const m = r.body.match;
+    
+    if (m.status === "playing") {
+      clearInterval(poll);
+      startLiveQuiz(matchId, localChapterId);
+    }
+  }, 2000);
+}
+
+let currentMatchId = null;
+let currentMatchScores = { host: 0, guest: 0, hostDone: false, guestDone: false };
+
+async function startLiveQuiz(matchId, localChapterId) {
+  currentMatchId = matchId;
+  screen = "match-quiz";
+  
+  // Get cards for this chapter and slice to 10 for the race
+  const cards = chapterCards(localChapterId).map(v => v.id);
+  const queue = shuffleArr(cards).slice(0, 10);
+  
+  // Initialize local race vars
+  currentMatchScores = { host: 0, guest: 0, hostDone: false, guestDone: false };
+  
+  // The server handles host/guest internally. We just poll for UI updates.
+  setInterval(async () => {
+    if (screen !== "match-quiz") return;
+    const r = await api("/api/match/status/" + matchId);
+    if (!r.ok) return;
+    const m = r.body.match;
+    
+    // Determine if I am host or guest
+    const isHost = m.host_id === authUser.id;
+    currentMatchScores = {
+      host: m.host_score,
+      guest: m.guest_score,
+      hostDone: m.host_done,
+      guestDone: m.guest_done
+    };
+
+    if (screen === "match-quiz") renderRaceQuestion(queue, localChapterId, isHost);
+  }, 2000);
+
+  renderRaceQuestion(queue, localChapterId, true);
+}
+
+function renderRaceQuestion(queue, localChapterId, isHost){
+  const app = document.getElementById("app");
+  
+  // If both are done, show results
+  if (currentMatchScores.hostDone && currentMatchScores.guestDone) {
+    screen = "match-results";
+    let result = "🤝 Tie!";
+    if (currentMatchScores.host > currentMatchScores.guest) result = "🏆 You win!";
+    if (currentMatchScores.host < currentMatchScores.guest) result = "💀 You lost!";
+    
+    app.innerHTML = `<div class="card"><div class="empty">
+      <div class="big">${result}</div>
+      <h2>${currentMatchScores.host} - ${currentMatchScores.guest}</h2>
+      <p>Great study session!</p>
+      <button class="small-btn" onclick="renderHome()">Back to Home</button>
+    </div></div>`;
+    return;
+  }
+
+  // If I am done but opponent isn't
+  if ((isHost && currentMatchScores.hostDone) || (!isHost && currentMatchScores.guestDone)) {
+    app.innerHTML = `<div class="card"><div class="empty"><div class="big">⏳</div>
+      <h2>You finished! Waiting...</h2>
+      <p>Opponent score: ${isHost ? currentMatchScores.guest : currentMatchScores.host}</p>
+    </div></div>`;
+    return;
+  }
+
+  // If opponent is done but I'm not, warn them (optional)
+  if ((isHost && currentMatchScores.guestDone) || (!isHost && currentMatchScores.hostDone)) {
+    toast("Opponent finished! Catch up!");
+  }
+
+  // Render next card in queue
+  if (queue.length === 0) {
+    // Local finish
+    api("/api/match/score/" + currentMatchId, {
+      method: "POST",
+      body: JSON.stringify({ score: isHost ? currentMatchScores.host : currentMatchScores.guest, done: true })
+    });
+    return;
+  }
+
+  const v = findVocab(queue[0]);
+  
+  app.innerHTML = `
+    <div class="session-progress">
+      <span>Host: ${currentMatchScores.host}</span>
+      <span>Guest: ${currentMatchScores.guest}</span>
+    </div>
+    <div class="progressbar"><div style="width:${(10-queue.length)*10}%"></div></div>
+    <div class="card tapzone" id="tapzone">
+      <div class="chaptertag">⚡ LIVE RACE · ${cleanChapterName(chapterById(localChapterId).name)}</div>
+      <div class="kanji">${v.k}</div>
+      <div class="reveal-hint" id="hint">tap to reveal</div>
+    </div>
+    <div id="gradeArea"></div>
+  `;
+  
+  document.getElementById("tapzone").addEventListener("click", ()=>{
+    document.getElementById("hint").outerHTML = `<div style="margin-top:16px;">
+      <div class="reading">${v.r}</div>
+      <div class="meaning">${v.m}</div>
+    </div>`;
+    document.getElementById("gradeArea").innerHTML = `<div class="grade-row">
+      <button class="g-wrong" id="markWrong">✗ Wrong</button>
+      <button class="g-right" id="markRight">✓ Correct</button>
+    </div>`;
+    document.getElementById("markRight").addEventListener("click", ()=> raceAnswer(queue, localChapterId, isHost, true));
+    document.getElementById("markWrong").addEventListener("click", ()=> raceAnswer(queue, localChapterId, isHost, false));
+  });
+}
+
+async function raceAnswer(queue, localChapterId, isHost, correct){
+  queue.shift(); // remove current card
+  if (correct) {
+    if (isHost) currentMatchScores.host++;
+    else currentMatchScores.guest++;
+  }
+  
+  await api("/api/match/score/" + currentMatchId, {
+    method: "POST",
+    body: JSON.stringify({ 
+      score: isHost ? currentMatchScores.host : currentMatchScores.guest, 
+      done: queue.length === 0 
+    })
+  });
+  
+  renderRaceQuestion(queue, localChapterId, isHost);
+}
 
 function startPresenceLoop(){
   clearInterval(presenceTimer);
@@ -1368,15 +1512,6 @@ function renderHowItWorks(){
         <li><b>Practicing</b> — you've started, but fewer than 70% of cards are at level 2+.</li>
         <li><b>Solid</b> — 70% or more of cards are at level 2+. The next chapter unlocks.</li>
         <li><b>Mastered</b> — 90% or more are at level 3. The chapter moves to your Collection.</li>
-      </ul>
-
-      <h2>What's on the home screen</h2>
-      <ul>
-        <li><b>Exam countdown</b> — how many days until the test.</li>
-        <li><b>Daily goal</b> — study this many cards today to keep your streak.</li>
-        <li><b>Current chapter</b> — the one you're working on. Swipe to see unlocked chapters.</li>
-        <li><b>Review</b> — a global queue of cards you've missed, plus anything studied that hasn't reached L3 yet.</li>
-        <li><b>Mastered</b> — chapters you've locked in. They stay there, safe.</li>
       </ul>
 
       <div class="highlight">💡 <b>Tip:</b> Consistency beats cramming. Twenty minutes a day for 6 months will beat ten hours the week before the exam. Every time.</div>

@@ -74,11 +74,6 @@ function publicUser(row) {
   };
 }
 
-const VALID_CARD_TYPES = ["kanji", "vocab"];
-function normalizeCardType(t) {
-  return VALID_CARD_TYPES.includes(t) ? t : "kanji";
-}
-
 async function seedUsers() {
   const users = [
     { name: process.env.SEED_USER_1, pass: process.env.SEED_PASSWORD },
@@ -89,9 +84,6 @@ async function seedUsers() {
     if (rows.length === 0) {
       const hash = await bcrypt.hash(u.pass, 10);
       await pool.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [u.name, hash]);
-      console.log(`created user: ${u.name}`);
-    } else {
-      console.log(`user exists: ${u.name}`);
     }
   }
 }
@@ -119,7 +111,6 @@ app.post("/api/auth/register", async (req, res) => {
     res.json({ token: sign(user), user: { id: user.id, username: user.username, display_name: null, avatar_emoji: null, is_admin: false } });
   } catch (e) {
     if (e.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "username taken" });
-    console.error(e);
     res.status(500).json({ error: "server error" });
   }
 });
@@ -280,19 +271,11 @@ app.get("/api/reactions/unseen", auth, async (req, res) => {
   res.json({ reactions: rows.map(r => {
     let parsedPayload = null;
     if (r.payload) {
-      try {
-        // MySQL sometimes returns JSON as a parsed object, sometimes as a string. Handle both.
-        parsedPayload = typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload;
-      } catch(e) { console.error("Payload parse error", e); }
+      try { parsedPayload = typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload; } catch(e) {}
     }
-    
     return {
-      id: r.id,
-      emoji: r.emoji,
-      kind: r.kind || "reaction",
-      payload: parsedPayload, // <--- THIS WAS THE BUG
-      created_at: r.created_at,
-      from_user_id: r.from_user_id,
+      id: r.id, emoji: r.emoji, kind: r.kind || "reaction", payload: parsedPayload,
+      created_at: r.created_at, from_user_id: r.from_user_id,
       from_display_name: r.from_display_name || r.from_username,
       from_avatar_emoji: r.from_avatar_emoji || null,
     };
@@ -308,6 +291,64 @@ app.post("/api/reactions/seen", auth, async (req, res) => {
     `UPDATE reactions SET seen = 1 WHERE to_user_id = ? AND id IN (${safeIds.map(()=>"?").join(",")})`,
     [req.user.id, ...safeIds]
   );
+  res.json({ ok: true });
+});
+
+/* ---------- MATCHES (1v1 Live Quiz) ---------- */
+app.post("/api/match/create", auth, async (req, res) => {
+  const { guest_id, chapter_id } = req.body || {};
+  if (!guest_id || !chapter_id) return res.status(400).json({ error: "guest_id and chapter_id required" });
+  
+  const [r] = await pool.query(
+    "INSERT INTO matches (host_id, guest_id, chapter_id, status) VALUES (?, ?, ?, 'pending')",
+    [req.user.id, guest_id, chapter_id]
+  );
+  res.json({ ok: true, match_id: r.insertId });
+});
+
+app.get("/api/match/status/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query("SELECT * FROM matches WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "match not found" });
+  const m = rows[0];
+  const isHost = m.host_id === req.user.id;
+  const isGuest = m.guest_id === req.user.id;
+  if (!isHost && !isGuest) return res.status(403).json({ error: "not your match" });
+
+  res.json({
+    match: {
+      id: m.id,
+      status: m.status,
+      chapter_id: m.chapter_id,
+      host_id: m.host_id,
+      guest_id: m.guest_id,
+      host_score: m.host_score,
+      guest_score: m.guest_score,
+      host_done: !!m.host_done,
+      guest_done: !!m.guest_done
+    }
+  });
+});
+
+app.post("/api/match/join/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  await pool.query("UPDATE matches SET status = 'playing' WHERE id = ? AND status = 'pending'", [id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/match/score/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  const { score, done } = req.body || {};
+  const [rows] = await pool.query("SELECT * FROM matches WHERE id = ?", [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "match not found" });
+  const m = rows[0];
+  const isHost = m.host_id === req.user.id;
+  
+  if (isHost) {
+    await pool.query("UPDATE matches SET host_score = ?, host_done = ? WHERE id = ?", [score, done ? 1 : 0, id]);
+  } else {
+    await pool.query("UPDATE matches SET guest_score = ?, guest_done = ? WHERE id = ?", [score, done ? 1 : 0, id]);
+  }
   res.json({ ok: true });
 });
 
@@ -347,10 +388,7 @@ app.post("/api/weak", auth, async (req, res) => {
   if (!items) return res.status(400).json({ error: "items array required" });
   if (items.length === 0) return res.json({ ok: true });
   const values = items.map(it => [
-    req.user.id,
-    normalizeCardType(it.card_type),
-    Number(it.card_id),
-    Math.max(0, Number(it.misses) || 0),
+    req.user.id, normalizeCardType(it.card_type), Number(it.card_id), Math.max(0, Number(it.misses) || 0),
   ]);
   await pool.query(
     `INSERT INTO weak_cards (user_id, card_type, card_id, misses) VALUES ?
@@ -403,10 +441,8 @@ app.post("/api/chapters", auth, adminOnly, async (req, res) => {
   const { name, cards } = req.body || {};
   if (!name || !Array.isArray(cards) || cards.length === 0) return res.status(400).json({ error: "name and non-empty cards array required" });
   const cleaned = cards.map(c => ({
-    k: (c.k || c.kanji || "").trim(),
-    r: (c.r || c.reading || "").trim(),
-    m: (c.m || c.meaning || "").trim(),
-    s: (c.s || c.sentence || "").trim(),
+    k: (c.k || c.kanji || "").trim(), r: (c.r || c.reading || "").trim(),
+    m: (c.m || c.meaning || "").trim(), s: (c.s || c.sentence || "").trim(),
   })).filter(c => c.k && c.r);
   if (cleaned.length === 0) return res.status(400).json({ error: "no valid cards" });
   const contentHash = hashChapter(name, cleaned);
@@ -428,7 +464,6 @@ app.post("/api/chapters", auth, adminOnly, async (req, res) => {
       const [existing] = await pool.query("SELECT id, name, created_at FROM chapters WHERE content_hash = ?", [contentHash]);
       return res.status(409).json({ error: "duplicate", existing: existing[0] || null });
     }
-    console.error(e);
     res.status(500).json({ error: "server error" });
   } finally {
     conn.release();
@@ -441,16 +476,12 @@ app.patch("/api/chapters/:id", auth, adminOnly, async (req, res) => {
   if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
   const trimmed = name.trim();
   if (trimmed.length > 200) return res.status(400).json({ error: "name too long" });
-  const [rows] = await pool.query("SELECT id FROM chapters WHERE id = ?", [id]);
-  if (rows.length === 0) return res.status(404).json({ error: "not found" });
   await pool.query("UPDATE chapters SET name = ? WHERE id = ?", [trimmed, id]);
   res.json({ ok: true, id, name: trimmed });
 });
 
 app.delete("/api/chapters/:id", auth, adminOnly, async (req, res) => {
   const id = Number(req.params.id);
-  const [rows] = await pool.query("SELECT id FROM chapters WHERE id = ?", [id]);
-  if (rows.length === 0) return res.status(404).json({ error: "not found" });
   await pool.query("DELETE FROM chapters WHERE id = ?", [id]);
   res.json({ ok: true });
 });
@@ -470,13 +501,9 @@ app.post("/api/progress", auth, async (req, res) => {
   if (!items) return res.status(400).json({ error: "items array required" });
   if (items.length === 0) return res.json({ ok: true, updated: 0 });
   const values = items.map(it => [
-    req.user.id,
-    normalizeCardType(it.card_type),
-    Number(it.card_id),
-    Math.max(0, Math.min(5, Number(it.box) || 0)),
-    it.due ? new Date(it.due) : null,
-    Math.max(0, Number(it.misses) || 0),
-    it.last_seen ? new Date(it.last_seen) : new Date(),
+    req.user.id, normalizeCardType(it.card_type), Number(it.card_id),
+    Math.max(0, Math.min(5, Number(it.box) || 0)), it.due ? new Date(it.due) : null,
+    Math.max(0, Number(it.misses) || 0), it.last_seen ? new Date(it.last_seen) : new Date(),
     it.level2_at ? new Date(it.level2_at) : null,
   ]);
   await pool.query(
